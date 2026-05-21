@@ -1,0 +1,7 @@
+megs: 32
+romimage: file="C:\Program Files\Bochs-3.0\BIOS-bochs-latest"
+vgaromimage: file="C:\Program Files\Bochs-3.0\VGABIOS-lgpl-latest.bin"
+ata0-master: type=cdrom, path="C:\Users\INTAL Admin\Downloads\eded\sovereign.iso", status=inserted
+boot: cdrom
+com1: enabled=1, mode=file, dev=serial.log
+log: bochs.log
