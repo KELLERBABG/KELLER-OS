@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KELLER-OS // Deterministic Microkernel &bull; Keller Systems</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Geist:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090a0c;
+      --surface: #101216;
+      --surface-raised: #14171d;
+      --border: #1c2027;
+      --border-hover: #2a313d;
+      --text-primary: #f0f2f5;
+      --text-secondary: #9aa2b1;
+      --text-tertiary: #5d6778;
+      --accent: #3b82f6;
+      --accent-text: #60a5fa;
+      --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: 'Geist Mono', ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text-primary); font-family: var(--font-sans); line-height: 1.6; min-height: 100vh; display: flex; flex-direction: column; justify-content: space-between; padding: 0; }
+    .container { max-width: 900px; margin: 0 auto; padding: 0 24px; width: 100%; }
+    .header { border-bottom: 1px solid var(--border); padding: 16px 0; background: rgba(9, 10, 12, 0.85); backdrop-filter: blur(8px); }
+    .nav { display: flex; justify-content: space-between; align-items: center; }
+    .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text-primary); font-weight: 600; font-size: 14px; }
+    .brand-mark { width: 22px; height: 22px; }
+    .nav-links a { font-size: 13px; color: var(--text-secondary); text-decoration: none; margin-left: 20px; transition: color 0.15s; }
+    .nav-links a:hover { color: var(--text-primary); }
+    .main { padding: 80px 0 60px; }
+    .eyebrow { font-family: var(--font-mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: 1px; color: var(--accent-text); display: block; margin-bottom: 12px; }
+    h1 { font-size: clamp(28px, 4vw, 42px); font-weight: 600; letter-spacing: -0.8px; line-height: 1.2; margin-bottom: 18px; }
+    .desc { font-size: 16px; color: var(--text-secondary); max-width: 720px; line-height: 1.65; margin-bottom: 36px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 28px; margin-bottom: 32px; }
+    .card-title { font-family: var(--font-mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-tertiary); margin-bottom: 12px; font-weight: 600; }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+    .btn { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 500; padding: 8px 16px; border-radius: 6px; text-decoration: none; transition: all 0.15s; }
+    .btn-primary { background: var(--surface-raised); border: 1px solid var(--border-hover); color: var(--text-primary); }
+    .btn-primary:hover { border-color: var(--accent); color: #fff; }
+    .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-secondary); }
+    .btn-secondary:hover { color: var(--text-primary); border-color: var(--border-hover); }
+    .footer { border-top: 1px solid var(--border); padding: 24px 0; font-size: 12.5px; color: var(--text-tertiary); font-family: var(--font-mono); display: flex; justify-content: space-between; }
+    .footer a { color: var(--text-secondary); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="container nav">
+      <a href="https://kellersystems.dev" class="brand">
+        <svg class="brand-mark" viewBox="0 0 32 32" fill="none">
+          <path d="M7 6V26" stroke="#f0f2f5" stroke-width="2.75" stroke-linecap="round"/>
+          <path d="M25 7L12 16L25 25" stroke="#60a5fa" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>Keller Systems</span>
+      </a>
+      <div class="nav-links">
+        <a href="https://kellersystems.dev">Ecosystem Portal &rarr;</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+    <div class="container">
+      <span class="eyebrow">kernel.kellersystems.dev</span>
+      <h1>KELLER-OS // Deterministic Microkernel</h1>
+      <p class="desc">Microkernel operating system architecture written in pure Rust with formally provable IPC.</p>
+
+      <div class="card">
+        <div class="card-title">System Repository &amp; Source Distribution</div>
+        <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 20px;">
+          This codebase is maintained under the Keller Systems sovereign engineering suite. Access documentation, crates, and verified source below.
+        </p>
+        <div class="actions">
+          <a href="https://github.com/KELLERBABG/KELLER-OS" target="_blank" rel="noopener noreferrer" class="btn btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+            </svg>
+            Source Code on GitHub
+          </a>
+          <a href="https://kellersystems.dev" class="btn btn-secondary">
+            &larr; Return to Keller Systems Portal
+          </a>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer container">
+    <div>kernel.kellersystems.dev &bull; Keller Systems</div>
+    <div><a href="https://kellersystems.dev">kellersystems.dev</a></div>
+  </footer>
+</body>
+</html>
