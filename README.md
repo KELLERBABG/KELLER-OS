@@ -116,7 +116,7 @@ KELLER-OS/
 │   ├── nic.rs                  # Intel 8254x (e1000): DMA descriptor rings, MAC, ARP replies, counters
 │   ├── pci.rs                  # PCI bus 0 enumeration, BAR sizing/assignment, VGA lookup
 │   ├── session.rs              # Capability tokens & 128-bit replay window
-│   └── vault.rs                # RAM sector encryption & panic-zeroing ├── dev-tools/                 # Local-only helpers: never needed to build or boot the kernel
+│   └── vault.rs                # RAM sector encryption & panic-zeroing ├── dev-tools/                 # Development-only helpers: never needed to build or boot the kernel
 │   ├── bochsrc.txt             # Bochs emulator hardware profile
 │   ├── disk_check.py           # Independent reader for a vault image: geometry, framing, no plaintext
 │   ├── make_font.py            # Bakes src/gui/font.rs from CascadiaMono.ttf

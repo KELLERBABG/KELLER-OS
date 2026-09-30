@@ -298,7 +298,7 @@ KELLER-OS/
 │   ├── session.rs              # 128-bit sliding replay window + ms timeouts
 │   ├── shell.rs                # COM1 line editor and command dispatch
 │   └── vault.rs                # RS-sharded root secret + per-sector AEAD
-├── dev-tools/                  # Local-only helpers: not needed to build or boot the kernel
+├── dev-tools/                  # Development-only helpers: not needed to build or boot the kernel
 │   ├── bochsrc.txt             # Bochs emulator hardware profile
 │   ├── disk_check.py           # Independent reader for a vault image: geometry, framing, no plaintext
 │   ├── make_font.py            # Bakes src/gui/font.rs from CascadiaMono.ttf (OFL)
