@@ -1,11 +1,23 @@
 [build]
-target = "C:\\Users\\INTAL Admin\\Downloads\\eded\\x86_64-sovereign_core.json"
+target = "x86_64-sovereign_core.json"
 
 [unstable]
 build-std = ["core", "alloc", "compiler_builtins"]
 build-std-features = ["compiler-builtins-mem"]
 
 [target.x86_64-unknown-none]
+rustflags = [
+    "-C", "link-arg=-Tsrc/linker.ld",
+    "-C", "link-arg=-no-pie",          # NEU: kein PIE
+    "-C", "link-arg=-static",          # NEU: statisch
+    "-C", "relocation-model=static",   # NEU: keine relocations
+    "-C", "panic=abort",
+    "-C", "target-cpu=generic",
+    "-C", "target-feature=-mmx,-sse,-sse2,-sse3,-ssse3,-sse4.1,-sse4.2,-avx,-avx2",
+    "--cfg", "curve25519_dalek_backend=\"serial\"",
+]
+
+[target.x86_64-sovereign_core]
 rustflags = [
     "-C", "link-arg=-Tsrc/linker.ld",
     "-C", "link-arg=-no-pie",          # NEU: kein PIE

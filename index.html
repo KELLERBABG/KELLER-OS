@@ -452,12 +452,12 @@
       <div class="code-terminal">
         <div class="terminal-bar">
           <span>bash — cargo build &amp; qemu</span>
-          <button class="copy-btn" onclick="navigator.clipboard.writeText('git clone https://github.com/KELLERBABG/KELLER-OS.git && cd KELLER-OS && cargo build --target x86_64-sovereign_core.json && qemu-system-x86_64 -cdrom sovereign.iso -nographic')">COPY</button>
+          <button class="copy-btn" onclick="navigator.clipboard.writeText('git clone https://github.com/KELLERBABG/KELLER-OS.git && cd KELLER-OS && cargo build --offline -Zjson-target-spec && qemu-system-x86_64 -cpu max -m 256M -kernel target/x86_64-sovereign_core/debug/sovereign-core -serial stdio -display none')">COPY</button>
         </div>
         <pre>git clone https://github.com/KELLERBABG/KELLER-OS.git
 cd KELLER-OS
-cargo build --target x86_64-sovereign_core.json --release
-qemu-system-x86_64 -cdrom sovereign.iso -serial stdio -display none</pre>
+cargo build --offline -Zjson-target-spec
+qemu-system-x86_64 -cpu max -m 256M -kernel target/x86_64-sovereign_core/debug/sovereign-core -serial stdio -display none</pre>
       </div>
     </section>
 
