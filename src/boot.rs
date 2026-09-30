@@ -7,7 +7,7 @@
 //!   -kernel <elf>` uses. No firmware or GRUB runs; the CPU enters 32-bit protected
 //!   mode at the 32-bit physical entry named by the note, with `%ebx` pointing at the
 //!   Xen `hvm_start_info` structure (memory map included). This is what
-//!   `tools/qemu_check.py` drives. QEMU's multiboot ROM cannot be used here because it
+//!   `dev-tools/qemu_check.py` drives. QEMU's multiboot ROM cannot be used here because it
 //!   only accepts 32-bit ELF images.
 //! * **Multiboot 2** (`0xE85250D6`) — used by GRUB for the bootable ISO image.
 //!

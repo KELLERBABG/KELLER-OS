@@ -25,8 +25,8 @@ are stronger than either alone.
 
 Usage
 -----
-    python tools/disk_check.py --img target/vault.img --marker "KELLER-OS PERSISTS"
-    python tools/disk_check.py --img target/vault-before.img --later target/vault.img \
+    python dev-tools/disk_check.py --img target/vault.img --marker "KELLER-OS PERSISTS"
+    python dev-tools/disk_check.py --img target/vault-before.img --later target/vault.img \
         --marker "KELLER-OS PERSISTS" --from-log target/disk-restore.log
 """
 

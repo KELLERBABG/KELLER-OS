@@ -5,7 +5,7 @@
 //! in-RAM stand-in. This module is the adapter between the two worlds, and it is deliberately
 //! the *only* place that knows about headers, so the framing can be checked against an
 //! independent implementation (the pinned known-answer vector below comes from a Python
-//! builder, and `tools/wire_check.py` parses the same bytes a third time when they cross the
+//! builder, and `dev-tools/wire_check.py` parses the same bytes a third time when they cross the
 //! wire).
 //!
 //! Layout of one datagram:

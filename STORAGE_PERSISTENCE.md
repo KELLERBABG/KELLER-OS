@@ -179,7 +179,7 @@ Run A formats, writes the marker and advances the journal:
 
 ```powershell
 & "C:\Program Files\qemu\qemu-img.exe" create -f raw target\vault.img 16M
-python tools\qemu_check.py --vga std --secs 60 --stdin-script target\disk-a.txt --stdin-delay 6 `
+python dev-tools\qemu_check.py --vga std --secs 60 --stdin-script target\disk-a.txt --stdin-delay 6 `
     --qemu-arg=-device --qemu-arg=ich9-ahci,id=ahci `
     --qemu-arg=-drive --qemu-arg=id=vdisk,file=target\vault.img,if=none,format=raw `
     --qemu-arg=-device --qemu-arg=ide-hd,drive=vdisk,bus=ahci.0 `
@@ -192,7 +192,7 @@ python tools\qemu_check.py --vga std --secs 60 --stdin-script target\disk-a.txt 
 Run B is the same image, in a second emulator process — a power cycle as far as the guest can tell:
 
 ```powershell
-python tools\qemu_check.py --vga std --secs 60 --stdin-script target\disk-b.txt --stdin-delay 6 `
+python dev-tools\qemu_check.py --vga std --secs 60 --stdin-script target\disk-b.txt --stdin-delay 6 `
     --qemu-arg=-device --qemu-arg=ich9-ahci,id=ahci `
     --qemu-arg=-drive --qemu-arg=id=vdisk,file=target\vault.img,if=none,format=raw `
     --qemu-arg=-device --qemu-arg=ide-hd,drive=vdisk,bus=ahci.0 `
@@ -210,13 +210,13 @@ shell busy for seconds and the emulator drops serial bytes that arrive while it 
 guest never echoed is re-sent, with the partial prefix erased first so a retry cannot turn into a
 different command.
 
-### 6.2 The other side of the cable: `tools/disk_check.py`
+### 6.2 The other side of the cable: ` dev-tools/disk_check.py`
 
 The guest's own self-tests prove the format works from the inside. The host tool opens the raw image
 and parses it with a second implementation of the same layout:
 
 ```powershell
-python tools\disk_check.py --img target\vault-a.img --later target\vault.img `
+python dev-tools\disk_check.py --img target\vault-a.img --later target\vault.img `
     --marker "KELLER-OS PERSISTS" --from-log target\disk-run-b.log
 ```
 
@@ -254,7 +254,7 @@ stronger than either alone.
 | `--vga none` | `137 passed, 0 failed, 20 skipped`, input probe `17 passed, 0 failed, 4 skipped` |
 | `-machine pc,i8042=off` | unchanged: `159 passed, 0 failed, 20 skipped`, and the injection run still fails honestly |
 | ring-3 phase | unchanged: 40/40, preemption proof, fault containment, frames back to 0 |
-| `tools/wire_check.py --secs 130` | unchanged: 11 frames on the wire, all validated independently |
+| ` dev-tools/wire_check.py --secs 130` | unchanged: 11 frames on the wire, all validated independently |
 | one flipped byte in a record | boot prints `[!!] VAULT RESTORE: refused (record-tampered)`, no lockdown, machine boots |
 | the disk unplugged entirely | `[--] STORAGE CONTROLLER: no AHCI controller on bus 0` — the vault stays in RAM |
 

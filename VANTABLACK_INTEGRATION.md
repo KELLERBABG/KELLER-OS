@@ -2,7 +2,7 @@
 **Document ID:** KOS-NET-VANTABLACK-2026  
 **Reference Repository:** [`https://github.com/KELLERBABG/Vantablack`](https://github.com/KELLERBABG/Vantablack)  
 **System Role:** Sovereign WAN Mesh Protocol & Native Internet Access Subsystem  
-**Integration Boundary:** Ring-0 `KellerNet` ([`src/net.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/net.rs)) & Ring-3 Sandboxed Network Daemon  
+**Integration Boundary:** Ring-0 `KellerNet` ([`src/net.rs`](src/net.rs)) & Ring-3 Sandboxed Network Daemon  
 **Cryptographic Suite:** ML-KEM-768/512 (Kyber), X25519, ChaCha20-Poly1305, ShardSec AEAD, RS(2,1), Sharks (2-of-3)
 
 ---
@@ -63,7 +63,7 @@ Instead, **[Vantablack (Global Ghost Net)](https://github.com/KELLERBABG/Vantabl
 ## 2. Core Vantablack Subsystems in KELLER-OS
 
 ### 2.1 Post-Quantum Hybrid Identity & The "Ghost Handshake"
-* **Integration Point:** [`src/crypto.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/crypto.rs) (`PeerIdentity::build_handshake_blob`)
+* **Integration Point:** [`src/crypto.rs`](src/crypto.rs) (`PeerIdentity::build_handshake_blob`)
 * **Mathematical Invariant:** Vantablack establishes peer sessions using hybrid **ML-KEM-768 / ML-KEM-512** (FIPS 203 Kyber) combined with **X25519 ECDH**.
 * **Handshake Sharding:** The 960-byte binary handshake blob (`GHOST_HANDSHAKE_`) is encoded into two 480-byte data shards and one parity shard using Reed-Solomon $\text{RS}(2,1)$. Even during acute link degradation, any 2 shards arriving at a peer establish session keys without connection renegotiation.
 
@@ -109,7 +109,7 @@ Instead, **[Vantablack (Global Ghost Net)](https://github.com/KELLERBABG/Vantabl
 |  * Adaptive Shard Router (multi-hop mesh routing, Chaos failover).      |
 |  * Local SOCKS5 Proxy Service (`127.0.0.1:1080`).                         |
 +--------------------------------------------------------------------------+
-```### 3.1 Packet Offsets in Bare-Metal Kernel ([`src/net.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/net.rs))
+```### 3.1 Packet Offsets in Bare-Metal Kernel ([`src/net.rs`](src/net.rs))
 The bare-metal kernel packet serialization in `src/net.rs` matches Vantablack's framing specification. Every frame is emitted at **exactly 576 bytes** (`WIRE_FRAME_LEN = BASE_SIZE + JITTER_MAX`), for data as well as handshake traffic:
 ```rust
 pub const BASE_SIZE: usize = 512;
@@ -153,15 +153,15 @@ combinatorial pairwise test scores against (see §2.3). Handshake frames carry n
 tamper budget (`shards_refused >= 3`) is severed until route recalculation calls
 `rehabilitate_peer()`, which is the hot-swap path of §4 Scenario C.
 
-### 3.2 Anti-Replay Session Guard Integration ([`src/session.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/session.rs))
+### 3.2 Anti-Replay Session Guard Integration ([`src/session.rs`](src/session.rs))
 Both the Vantablack daemon and the microkernel verify in-flight packet counters against the 128-bit sliding window bitmap (`KernelSessionGuard`), ensuring replayed mesh packets are rejected in constant time before decryption allocations occur. In the kernel the guard is **per peer**: the message counter is consumed by the first shard of a message, the remaining shards of that same message fold into the same window slot (they are position-bound by their ShardSec AAD, so a shard cannot be smuggled in twice), and a frame that arrives after the peer's window has moved on is dropped before any AEAD work is scheduled.
 
 ### 3.3 Physical Wire Transport — implemented, still ring 0
 
 The transport the diagram above calls the sandbox's job is now real, with one deliberate difference:
-it runs in **ring 0**. [`src/eth.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/eth.rs)
+it runs in **ring 0**. [`src/eth.rs`](src/eth.rs)
 wraps each sealed 576-byte frame in Ethernet/IPv4/UDP (mesh port `0x4B4C`, probe port `0x4B4D`) and
-[`src/nic.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/nic.rs) drives the
+[`src/nic.rs`](src/nic.rs) drives the
 Intel 8254x (`e1000`) with 8 transmit and 8 receive descriptors over 4 KiB identity-mapped frames, so
 the mesh's cover traffic, handshakes and data frames all leave the machine on a real segment, and a
 peer's frames come back through the same `ingest_from` pipeline the loopback wire uses. The driver also
@@ -175,7 +175,7 @@ raw BAR today would hand it the whole physical address space, which is the oppos
 would be sitting on. The plumbing that split needs is already in place (the rings are ordinary frames,
 MMIO goes through one window, and the ports plus DMA addresses are the only things a grant would have
 to cover), so the move is a sandbox boundary rather than a rewrite. Full design, the descriptor rules
-that were bugs first, and the independent "[`tools/wire_check.py`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/tools/wire_check.py)"
+that were bugs first, and the independent "[`dev- dev-tools/wire_check.py`](dev- dev-tools/wire_check.py)"
 peer that validates every frame from the other end of the cable: [`NIC_WIRE.md`](NIC_WIRE.md).
 
 ### 3.4 Poisson Cover Traffic
@@ -207,14 +207,14 @@ Idle links are filled with decoy frames from `CoverTraffic`: one Bernoulli trial
 
 | Vantablack Feature | KELLER-OS Implementation | Verification |
 | :--- | :--- | :--- |
-| **Hybrid ML-KEM/Kyber** | [`src/crypto.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/crypto.rs) (`PeerIdentity`) | Implemented |
-| **Shamir 2-of-3 Key Shares** | [`src/crypto.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/crypto.rs) (`shamir_split`/`join`) | Implemented |
-| **Reed-Solomon RS(2,1)** | [`src/crypto.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/crypto.rs) (`rs_encode`) | Implemented |
-| **Pure-Rust ChaCha20-Poly1305**| [`src/crypto.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/crypto.rs) (`Poly1305`) | Implemented |
+| **Hybrid ML-KEM/Kyber** | [`src/crypto.rs`](src/crypto.rs) (`PeerIdentity`) | Implemented |
+| **Shamir 2-of-3 Key Shares** | [`src/crypto.rs`](src/crypto.rs) (`shamir_split`/`join`) | Implemented |
+| **Reed-Solomon RS(2,1)** | [`src/crypto.rs`](src/crypto.rs) (`rs_encode`) | Implemented |
+| **Pure-Rust ChaCha20-Poly1305**| [`src/crypto.rs`](src/crypto.rs) (`Poly1305`) | Implemented |
 | **ShardSec per-shard AEAD** | `ShardSec::seal/open` with HKDF subkeys per shard index | `net test`: shard-swap / index-swap / counter-swap / tail-tamper rejected |
 | **Message-level authentication** | 16-byte HMAC tag inside the coded message | `net test`: round-trip + pairwise MAC test |
 | **Byzantine tamper isolation** | `pairwise_verify` over $(0,1),(0,2),(1,2)$ | `net test`: accused route pinned, pristine plaintext delivered, padding-only divergence not accused |
-| **128-Bit Sliding Replay Window**| [`src/session.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/session.rs) (`KernelSessionGuard`), per peer in `KellerNet` | `session test` + `net test`: replay / window boundary |
+| **128-Bit Sliding Replay Window**| [`src/session.rs`](src/session.rs) (`KernelSessionGuard`), per peer in `KellerNet` | `session test` + `net test`: replay / window boundary |
 | **576-Byte Quantized Frames** | `build_frame` rejects any block that cannot reach 576 bytes | `net test`: every emitted frame is exactly 576 bytes |
 | **Authenticated entropy tail** | tail is drawn from the DRBG and covered by the ShardSec AAD | `net test`: tail-tamper rejected |
 | **Poisson cover traffic** | `CoverTraffic` (λ = 0.2 frames/s; sampler rate checked statistically at boot probe) | `net test`: Poisson rate + decoy frame accepted and counted as cover |

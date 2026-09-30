@@ -3,7 +3,7 @@
 **Scope.** What it takes to put the Vantablack mesh's sealed frames on a real wire from bare
 metal: the Intel 8254x (`e1000`) driver in [`src/nic.rs`](src/nic.rs), the Ethernet/IPv4/UDP
 framing in [`src/eth.rs`](src/eth.rs), and the independent tool
-([`tools/wire_check.py`](tools/wire_check.py)) that attaches to the guest's adapter as its peer
+([`dev- dev-tools/wire_check.py`](dev- dev-tools/wire_check.py)) that attaches to the guest's adapter as its peer
 and checks every claim from the outside.
 
 Until this landed, the mesh's transport was `net::CaptureSender`: an in-RAM stand-in that handed
@@ -110,12 +110,12 @@ The kernel's own answer is a start: 47 assertions read the configuration back *o
 the interrupt mask, the ring alignment and the ring bases as the device kept them) plus the whole
 framing layer including its known-answer vector.
 
-That is the device and the guest agreeing with themselves. `tools/wire_check.py` is the other end
+That is the device and the guest agreeing with themselves. `dev- dev-tools/wire_check.py` is the other end
 of the cable: it boots QEMU with `-nic none -netdev socket,id=wire,listen=... -device e1000`, so
 the only station on the segment is the tool, and then it does five things.
 
 ```powershell
-python tools\wire_check.py --secs 130
+python dev-tools\wire_check.py --secs 130
 ```
 
 1. **Validates every frame the guest transmits** from the outside in — Ethernet addresses and

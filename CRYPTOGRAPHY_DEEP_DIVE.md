@@ -16,7 +16,7 @@ Traditional secure operating systems and network stacks (e.g., TLS 1.3, WireGuar
 3. **Single-Path Interception & Jamming:** Interception of a single network link or physical line tap provides the adversary with the complete encrypted stream.
 4. **Physical Memory Extraction:** Cold-boot attacks (liquid nitrogen memory freezing) or hardware DMA taps can extract long-term private keys from RAM.
 
-**KELLER-OS** addresses these existential vectors by unifying **Microkernel Ring-0/Ring-3 isolation** with a **Global Multi-Path Sovereign Mesh Protocol**. Every piece of data—whether at rest in the kernel [`src/vault.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/vault.rs) or in transit across decentralized mesh nodes via [`src/net.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/net.rs)—is protected by a layered defense combining:
+**KELLER-OS** addresses these existential vectors by unifying **Microkernel Ring-0/Ring-3 isolation** with a **Global Multi-Path Sovereign Mesh Protocol**. Every piece of data—whether at rest in the kernel [`src/vault.rs`](src/vault.rs) or in transit across decentralized mesh nodes via [`src/net.rs`](src/net.rs)—is protected by a layered defense combining:
 
 * **Hybrid Post-Quantum Lattice + Classical ECDH Key Encapsulation.**
 * **Disjoint Multi-Path Packet Splitting:** Shamir Secret Sharing $k = 2, n = 3$ combined with Reed-Solomon Erasure Coding $\text{RS}(2, 1)$.
@@ -70,7 +70,7 @@ In the KELLER-OS global mesh network, nodes do not transmit monolithic encrypted
 ```
 
 ### 2.1 Information-Theoretic Security via Shamir Splitting
-* **Implementation:** [`src/crypto.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/crypto.rs) (`shamir_split`, `shamir_join`) utilizing the polynomial dealer:
+* **Implementation:** [`src/crypto.rs`](src/crypto.rs) (`shamir_split`, `shamir_join`) utilizing the polynomial dealer:
   $$f(x) = S + a_1 x \pmod p$$
   Where $S \in \mathbb{F}_p$ is the secret 256-bit symmetric session key, and $a_1$ is drawn directly from the CPU hardware entropy pool.
 * **Adversary Interception Analysis:**
@@ -79,7 +79,7 @@ In the KELLER-OS global mesh network, nodes do not transmit monolithic encrypted
   The adversary gains **strictly zero Shannon information** regarding the encryption key. Even with unbounded computational power (including quantum supercomputing), the secret key cannot be deduced from a single packet.
 
 ### 2.2 Fault-Tolerant Reassembly via Reed-Solomon $\text{RS}(2, 1)$
-* **Implementation:** [`src/crypto.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/crypto.rs) (`rs_encode`, `rs_reconstruct`) over Galois Field $\text{GF}(2^8)$:
+* **Implementation:** [`src/crypto.rs`](src/crypto.rs) (`rs_encode`, `rs_reconstruct`) over Galois Field $\text{GF}(2^8)$:
   * Input data is split into $K = 2$ data shards.
   * A parity shard $M = 1$ is calculated using Cauchy/Vandermonde generator matrices.
 * **Mesh Resilience Guarantee:**
@@ -104,7 +104,7 @@ To guard against the **Harvest-Now, Decrypt-Later (HNDL)** attack vector, KELLER
 ```
 
 ### 3.1 The 960-Byte Handshake Blob Layout
-Constructed via `PeerIdentity::build_handshake_blob()` in [`src/crypto.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/crypto.rs):
+Constructed via `PeerIdentity::build_handshake_blob()` in [`src/crypto.rs`](src/crypto.rs):
 
 ```
  0x000     0x010                      0x030                               0x350                0x370               0x3C0
@@ -136,7 +136,7 @@ Operating systems running in x86_64 long mode inside bare-metal kernel space (`R
 
 Most standard cryptographic crates (e.g., standard `ring` or OpenSSL) fail to compile or cause CPU exceptions in `#no_std` kernel mode because they depend on AVX2/SSE2 vector intrinsics.
 
-KELLER-OS implements a **custom, pure-Rust RFC 8439 ChaCha20-Poly1305 AEAD engine** in [`src/crypto.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/crypto.rs):
+KELLER-OS implements a **custom, pure-Rust RFC 8439 ChaCha20-Poly1305 AEAD engine** in [`src/crypto.rs`](src/crypto.rs):
 
 ### 4.1 Poly1305 130-Bit Integer Arithmetic
 Poly1305 evaluates a polynomial modulo the prime $2^{130} - 5$. In KELLER-OS, this is evaluated using five 26-bit limbs stored in 32-bit unsigned integers:
@@ -199,7 +199,7 @@ by `crypto::self_test()`: RFC 8439 §2.3.2 (ChaCha20 block), §2.5.2 (Poly1305) 
 In global mesh networks, adversaries who cannot break the cryptography frequently resort to **metadata analysis**: tracking packet sizes, interval timing, and transmission sequences to infer who is communicating and when.
 
 ### 5.1 Wire-Level Packet Layout
-Every packet produced by [`src/net.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/net.rs) is exactly **576 bytes** (`BASE_SIZE + JITTER_MAX`), in both directions:
+Every packet produced by [`src/net.rs`](src/net.rs) is exactly **576 bytes** (`BASE_SIZE + JITTER_MAX`), in both directions:
 
 ```
 Byte 0      Byte 1      Byte 2..35       Byte 35..43      Byte 43..522                        Byte 522..576
@@ -228,7 +228,7 @@ The tag covers the 43-byte frame header, the shard index, the declared block len
 
 Because mesh networks route packets over multi-hop, asynchronous, and potentially out-of-order links, conventional strictly monotonic sequence checks cause legitimate packets to be dropped. Conversely, accepting out-of-order packets without validation exposes the kernel to **Replay Attacks** (where an attacker retransmits captured valid packets to trigger duplicate actions).
 
-Implemented in [`src/session.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/session.rs) via `KernelSessionGuard`:
+Implemented in [`src/session.rs`](src/session.rs) via `KernelSessionGuard`:
 
 ```rust
 pub struct KernelSessionGuard {
@@ -243,7 +243,7 @@ pub struct KernelSessionGuard {
 pub fn accept(&mut self, counter: u64) -> SessionVerdict  // Accepted | Replay | Expired | OutOfWindow
 ```
 
-[`src/net.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/net.rs) holds **one guard per peer**: a message counter is consumed when the first shard of that message arrives, every shard riding the same counter folds into that window slot, and the verdict is reached before any AEAD work is scheduled.
+[`src/net.rs`](src/net.rs) holds **one guard per peer**: a message counter is consumed when the first shard of that message arrives, every shard riding the same counter folds into that window slot, and the verdict is reached before any AEAD work is scheduled.
 
 ```
                         SLIDING BITMASK WINDOW (128 BITS)
@@ -277,7 +277,7 @@ Window State:           | 1 | 0 | 1 | 1 | 1 | 1 | 0 | 1 | 1 | 1 |
 
 KELLER-OS completely eliminates the concept of password hashes (e.g. bcrypt, Argon2) stored on disk. Stored hashes remain vulnerable to offline dictionary cracking if the physical drive is imaged.
 
-Instead, [`src/session.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/session.rs) and [`src/crypto.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/crypto.rs) execute an interactive **Schnorr Zero-Knowledge Identification Protocol** over Curve25519:
+Instead, [`src/session.rs`](src/session.rs) and [`src/crypto.rs`](src/crypto.rs) execute an interactive **Schnorr Zero-Knowledge Identification Protocol** over Curve25519:
 
 ### Mathematical Protocol:
 * **Public Parameter:** Generator point $G \in E(\mathbb{F}_p)$.
@@ -313,7 +313,7 @@ If an operator is under physical duress, entering a designated **decoy credentia
 ## 8. Anti-Forensic Memory Vault & Panic Zeroing
 
 ### 8.1 In-RAM Sector Sharding (`KellerVault`)
-In [`src/vault.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/vault.rs), sensitive keys and credentials are not held in contiguous plaintext memory blocks. Upon initialization, `KellerVault::new(data)` executes Reed-Solomon $(2, 1)$ encoding across the payload, storing it as disjoint memory shards. An attacker reading arbitrary raw memory addresses cannot read contiguous strings or keys.
+In [`src/vault.rs`](src/vault.rs), sensitive keys and credentials are not held in contiguous plaintext memory blocks. Upon initialization, `KellerVault::new(data)` executes Reed-Solomon $(2, 1)$ encoding across the payload, storing it as disjoint memory shards. An attacker reading arbitrary raw memory addresses cannot read contiguous strings or keys.
 
 ### 8.2 Volatile Panic Scrubbing
 When a system tamper sensor fires, or an unrecoverable kernel panic occurs, the `purge()` method executes volatile memory wiping:

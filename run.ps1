@@ -17,10 +17,10 @@
 #
 #   .\run.ps1                 # QEMU window + COM1 on this terminal (log also mirrors into
 #                             # the shell window inside the GUI)
-#   .\run.ps1 -Headless       # adapter emulated, no window (for tools/qemu_check.py runs)
+#   .\run.ps1 -Headless       # adapter emulated, no window (for dev-tools/qemu_check.py runs)
 #   .\run.ps1 -NoGraphics     # no display adapter at all: serial console only
 #
-# Scripted verification with expected output lives in tools/qemu_check.py.
+# Scripted verification with expected output lives in dev-tools/qemu_check.py.
 
 param(
     [switch]$Headless,

@@ -24,7 +24,7 @@
 //!
 //! **The workload is real cryptography** - ChaCha20 keystream over 4 KiB chunks chained through
 //! SHA-256, [`KAT_ROUNDS`] rounds of it - and it is *pinned*: the same parameters were computed
-//! a second time by an independent implementation (`tools/smp_check.py`), so agreement is
+//! a second time by an independent implementation (`dev-tools/smp_check.py`), so agreement is
 //! evidence rather than a tautology. The live job repeats it with a fresh random key and requires
 //! every core to agree, which is a claim no single core can satisfy on its own.
 //!
@@ -250,7 +250,7 @@ pub const KAT_ROUNDS: u32 = 8;
 /// The keystream length one round consumes: 16 ChaCha20 blocks.
 pub const ROUND_BYTES: usize = 1024;
 /// The pinned digest, produced by an independent implementation of the same construction
-/// (`tools/smp_check.py`, which validates its own ChaCha20 and SHA-256 against the RFC 8439 and
+/// (`dev-tools/smp_check.py`, which validates its own ChaCha20 and SHA-256 against the RFC 8439 and
 /// FIPS 180-4 vectors before it is allowed to produce this number).
 pub const KAT_DIGEST: [u8; 32] = [
     0x5f, 0xa1, 0x84, 0xc8, 0xb6, 0x40, 0x3e, 0x0d, 0x6a, 0xc3, 0x88, 0xf3, 0xb1, 0xab, 0x95, 0x6d,
@@ -389,7 +389,7 @@ pub fn last_digest(cpu: usize) -> Option<[u8; 32]> {
 // ---------------------------------------------------------------- the workload
 
 /// The offload workload. Identical for every core and for the boot processor's own cross-check,
-/// and identical to the independent implementation in `tools/smp_check.py`.
+/// and identical to the independent implementation in `dev-tools/smp_check.py`.
 fn compute(
     key: &[u8; crypto::KEY_LEN],
     nonce: &[u8; crypto::NONCE_LEN],

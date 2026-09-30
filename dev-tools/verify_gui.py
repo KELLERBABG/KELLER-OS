@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Verify a QEMU screendump against GUI_SPECIFICATION.md §4 (layout) and §5 (palette).
 
-`tools/qemu_check.py --vga std --screendump target/gui.ppm` captures the emulated screen;
+`dev-tools/qemu_check.py --vga std --screendump target/gui.ppm` captures the emulated screen;
 this script reads that PPM, checks that the framebuffer really holds the display server's
 windows, rules and palette - in the rectangles the serial log claims - and writes a PNG
 next to it so the frame can be eyeballed in any viewer.
@@ -9,7 +9,7 @@ next to it so the frame can be eyeballed in any viewer.
 Glyph shapes are not OCR'd: `gui test` proves glyph coverage through the aperture, this
 proves the pixels on screen are the specified colours in the specified rectangles.
 
-    python tools/verify_gui.py --ppm target/gui.ppm --png target/gui.png
+    python dev-tools/verify_gui.py --ppm target/gui.ppm --png target/gui.png
 """
 
 from __future__ import annotations
@@ -238,7 +238,7 @@ def main() -> int:
 
     # 6. The console tile actually mirrors the kernel log (the boot log alone is ~40 lines).
     #    Ink is counted per 16-row text cell, not per pixel row: a cell's top rows are blank
-    #    because the baked font sits on a baseline (see tools/make_font.py).
+    #    because the baked font sits on a baseline (see dev-tools/make_font.py).
     _, cx, cy, cw, ch, _ = WINDOWS[0]
     bands_with_ink = 0
     for band in range(cy + CHROME_HEIGHT + 2, cy + ch - 4, 16):
@@ -324,7 +324,7 @@ def main() -> int:
  p {{ color:#94a3b8; max-width:{width}px; }}
 </style></head><body>
 <h1>QEMU -vga std screendump &mdash; {width}x{height}x32</h1>
-<p>Captured by <code>tools/qemu_check.py --screendump</code> after booting the kernel and
+<p>Captured by <code>dev-tools/qemu_check.py --screendump</code> after booting the kernel and
 running <code>status</code>, <code>input</code>, <code>input test</code>, <code>gui</code>,
 <code>gui test</code>, <code>selftest</code> and <code>net</code> over the serial console, then
 injecting pointer motion, two left clicks and a typed command through the emulated PS/2

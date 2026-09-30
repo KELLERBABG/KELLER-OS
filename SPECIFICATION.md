@@ -112,7 +112,7 @@ The microkernel core resides in [`src/main.rs`](src/main.rs), [`src/boot.rs`](sr
 ## 4. Subsystem Specifications
 
 ### Subsystem I: `Keller Vault` (Memory Encryption & Panic-Zeroing)
-* **Location:** [`src/vault.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/vault.rs), [`src/crypto.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/crypto.rs)
+* **Location:** [`src/vault.rs`](src/vault.rs), [`src/crypto.rs`](src/crypto.rs)
 * **Persistence:** [`src/storage.rs`](src/storage.rs) (the image), [`src/arch/ahci.rs`](src/arch/ahci.rs) (the AHCI/SATA controller), [`src/block.rs`](src/block.rs) (the sector layer and its in-memory reference device), [`src/zk.rs`](src/zk.rs) (the proof that gates the image's key) — design, format and verification in [`STORAGE_PERSISTENCE.md`](STORAGE_PERSISTENCE.md).
 * **Specification:**
   1. **Sector Encryption:** Implements in-memory sector encryption utilizing ChaCha20-Poly1305 / AES-XTS. RAM pages are encrypted with ephemeral session keys derived at boot.
@@ -124,9 +124,9 @@ The microkernel core resides in [`src/main.rs`](src/main.rs), [`src/boot.rs`](sr
   3. **Persistent Vault Image (implemented):** sealed sectors are written to a real disk as an image with a superblock and one record per slot, and read back at boot. The disk key is *not* stored: it is derived from a Schnorr proof over the header that is on the medium (`HKDF-SHA256` salted with the image's device nonce), so the medium holds no secret, no shard of one, and no hash to test guesses against — only the group commitment `X`. A wrong secret, an edited header and an edited record are three distinct refusals, and none of them yields a key. Every save increments a generation bound into each record's AAD (so a mixture of two saves cannot load) and a journal sector carries a counter and a random stamp that only the medium could have kept.
 
 ### Subsystem II: `Keller Net` & Vantablack (Sovereign WAN Mesh & Native Internet Access)
-* **Master Specification:** [`VANTABLACK_INTEGRATION.md`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/VANTABLACK_INTEGRATION.md)
+* **Master Specification:** [`VANTABLACK_INTEGRATION.md`](VANTABLACK_INTEGRATION.md)
 * **Reference Implementation:** [KELLERBABG/Vantablack](https://github.com/KELLERBABG/Vantablack)
-* **Location:** [`src/net.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/net.rs), [`src/session.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/session.rs)
+* **Location:** [`src/net.rs`](src/net.rs), [`src/session.rs`](src/session.rs)
 * **Specification:**
   1. **Zero-Leak Native Internet Layer:** Direct, unencrypted TCP/IP to commercial ISP gateways is prohibited. [Vantablack](https://github.com/KELLERBABG/Vantablack) serves as the native sovereign internet access engine, encapsulating all external traffic into multi-path, erasure-sharded privacy frames.
   2. **Asymmetric Shard Routing:** Payloads are split via Reed-Solomon $\text{RS}(2,1)$ and Shamir Secret Sharing (2-of-3) across divergent WAN carrier routes. Any 2 shards reconstruct pristine plaintext without retransmissions.
@@ -135,7 +135,7 @@ The microkernel core resides in [`src/main.rs`](src/main.rs), [`src/boot.rs`](sr
   5. **Air-Gap DMA Protection:** SDR (Software Defined Radio) and physical NICs operate in Ring 3 without direct kernel DMA access. Peripherals write strictly into isolated bounce buffers.
 
 ### Subsystem III: `Keller Auth` (Zero-Knowledge Identity & Capabilities)
-* **Location:** [`src/session.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/session.rs), [`src/crypto.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/crypto.rs)
+* **Location:** [`src/session.rs`](src/session.rs), [`src/crypto.rs`](src/crypto.rs)
 * **Specification:**
   1. **Schnorr Zero-Knowledge Identification:** Proof of identity is established without transmitting private keys, passwords, or hashed credentials. The prover demonstrates knowledge of a discrete logarithm over Curve25519:
      $$\text{Prover chooses } r \leftarrow \mathbb{Z}_q,\; R = r \cdot G$$
@@ -162,7 +162,7 @@ The microkernel core resides in [`src/main.rs`](src/main.rs), [`src/boot.rs`](sr
 
 ## 5. Graphical User Interface (GUI) Specification
 
-* **Comprehensive Reference:** [`GUI_SPECIFICATION.md`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/GUI_SPECIFICATION.md)
+* **Comprehensive Reference:** [`GUI_SPECIFICATION.md`](GUI_SPECIFICATION.md)
 * **Design Philosophy:** Minimalist, brutalist, zero animations, fixed-slot deterministic refresh.
 
 ### 5.1 Video Mode Acquisition
@@ -204,7 +204,7 @@ bring-up window set yet (see [`GUI_SPECIFICATION.md`](GUI_SPECIFICATION.md) §6)
 ```
 
 ### 5.3 Rasterizer & Font Subsystem
-* Embedded 8x16 monospaced ASCII bitmap font in `.rodata` for zero-allocation text rendering: `FONT_8X16: [u8; 256 * 16]` in [`src/gui/font.rs`](src/gui/font.rs), baked by [`tools/make_font.py`](tools/make_font.py) from CascadiaMono.ttf (SIL OFL 1.1).
+* Embedded 8x16 monospaced ASCII bitmap font in `.rodata` for zero-allocation text rendering: `FONT_8X16: [u8; 256 * 16]` in [`src/gui/font.rs`](src/gui/font.rs), baked by [` dev-tools/make_font.py`](dev- dev-tools/make_font.py) from CascadiaMono.ttf (SIL OFL 1.1).
 * Double-buffered backbuffer (3 MiB `Vec<u32>` in the heap) to eliminate tearing without GPU interrupts; only dirty rectangles are copied to the aperture.
 * Fixed 100 ms refresh slot driven from the idle loop, so a repaint never runs in an interrupt and never allocates.
 * Mask on panic ensures zero visual persistence on LCD/CRT panels (`fb::scrub_hook`); verified by capturing the screen after `panic` and finding all 786432 pixels black.
@@ -217,9 +217,9 @@ bring-up window set yet (see [`GUI_SPECIFICATION.md`](GUI_SPECIFICATION.md) §6)
 
 ## 6. Cryptographic Architecture & Primitives
 
-* **Comprehensive Master Reference:** [`CRYPTOGRAPHY_DEEP_DIVE.md`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/CRYPTOGRAPHY_DEEP_DIVE.md)
+* **Comprehensive Master Reference:** [`CRYPTOGRAPHY_DEEP_DIVE.md`](CRYPTOGRAPHY_DEEP_DIVE.md)
 
-KELLER-OS implements a multi-path global mesh cryptographic engine combining post-quantum lattice cryptography (Kyber-512), classical curve cryptography (Ed25519/X25519), pure-Rust constant-time ChaCha20-Poly1305 AEAD, Shamir secret sharing (2-of-3 threshold), and Reed-Solomon RS(2,1) erasure coding directly within [`src/crypto.rs`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/src/crypto.rs):
+KELLER-OS implements a multi-path global mesh cryptographic engine combining post-quantum lattice cryptography (Kyber-512), classical curve cryptography (Ed25519/X25519), pure-Rust constant-time ChaCha20-Poly1305 AEAD, Shamir secret sharing (2-of-3 threshold), and Reed-Solomon RS(2,1) erasure coding directly within [`src/crypto.rs`](src/crypto.rs):
 
 ```
 +--------------------------------------------------------------------------+
@@ -249,7 +249,7 @@ KELLER-OS implements a multi-path global mesh cryptographic engine combining pos
 
 To guarantee sovereign supply-chain integrity:
 1. **Deterministic Binaries:** The build system produces bit-for-bit identical ELF binaries from source code. All timestamps, random build paths, and host metadata are excluded.
-2. **Toolchain Pinning:** Rust nightly toolchain is strictly pinned via [`rust-toolchain.toml`](file:///c:/Users/lukas/Downloads/SYSTEMS%20&%20CREATIONS/KELLER-OS/rust-toolchain.toml) (`nightly-x86_64-pc-windows-msvc` / `rust-src`).
+2. **Toolchain Pinning:** Rust nightly toolchain is strictly pinned via [`rust-toolchain.toml`](rust-toolchain.toml) (`nightly-x86_64-pc-windows-msvc` / `rust-src`).
 3. **Formal Verification Roadmap:**
    * **TLA+:** Modeling the capability grant/revocation state machine to prove absence of deadlock and privilege leakage.
    * **Coq / Lean:** Inductive proofs verifying the mathematical correctness of the linked-list allocator and panic-zeroing routines.
@@ -298,14 +298,15 @@ KELLER-OS/
 │   ├── session.rs              # 128-bit sliding replay window + ms timeouts
 │   ├── shell.rs                # COM1 line editor and command dispatch
 │   └── vault.rs                # RS-sharded root secret + per-sector AEAD
-├── tools/
-│   ├── make_font.py            # Bakes src/gui/font.rs from CascadiaMono.ttf (OFL)
-│   ├── qemu_check.py           # Headless verification harness (expect/forbid, screendump)
+├── dev-tools/                  # Local-only helpers: not needed to build or boot the kernel
+│   ├── bochsrc.txt             # Bochs emulator hardware profile
 │   ├── disk_check.py           # Independent reader for a vault image: geometry, framing, no plaintext
-│   ├── wire_check.py           # Independent peer on the NIC's segment: validates every frame
-│   └── verify_gui.py           # Checks a screendump against the GUI spec, writes PNG/HTML
+│   ├── make_font.py            # Bakes src/gui/font.rs from CascadiaMono.ttf (OFL)
+│   ├── qemu_check.py           # Headless verification harness (expect/forbid, screendump, input)
+│   ├── smp_check.py            # Independent ChaCha20/SHA-256 checks of the per-AP KAT digests
+│   ├── verify_gui.py           # Checks a screendump against the GUI spec, writes PNG/HTML
+│   └── wire_check.py           # Independent peer on the NIC's segment: validates every frame
 ├── .gitignore                  # Build artifact and log exclusions
-├── bochsrc.txt                 # Bochs emulator hardware profile
 ├── build.rs                    # Cargo build script linking assembly bootstrap
 ├── Cargo.lock                  # Pinned dependency lockfile
 ├── Cargo.toml                  # Package manifest & profile optimizations
@@ -315,7 +316,6 @@ KELLER-OS/
 ├── KELLER OS.canvas            # Obsidian master architectural canvas
 ├── run.ps1                     # QEMU launch and debug harness
 ├── rust-toolchain.toml         # Nightly channel & component configuration
-├── sovereign.iso               # Prebuilt ISO (stale: predates PVH boot; see README step 5)
 ├── SPECIFICATION.md            # This Master System Specification document
 ├── STORAGE_PERSISTENCE.md      # Persistent vault storage: AHCI driver, image format, unlock gate
 ├── VANTABLACK_INTEGRATION.md   # Sovereign WAN Mesh & Native Internet Access Specification
@@ -334,7 +334,7 @@ Runs QEMU with serial output directed to stdio and guest error reporting enabled
 
 ### Scripted Verification Harness
 ```powershell
-python tools\qemu_check.py --secs 32 --stdin-script target\full-input.txt `
+python dev-tools\qemu_check.py --secs 32 --stdin-script target\full-input.txt `
     --expect "SELF-TEST SUMMARY: 159 passed, 0 failed" --forbid "LOCKDOWN" --forbid "NIC KAT FAILED"
 # (159 with a network adapter and no disk: the AHCI adapter checks report themselves skipped,
 #  which appends a "20 skipped" clause to the same line. Attach the disk in the Step 7 commands
@@ -342,7 +342,7 @@ python tools\qemu_check.py --secs 32 --stdin-script target\full-input.txt `
 
 # Persistent storage, checked from both ends: two emulator processes against one image file, then
 # an independent host-side reader of the raw image
-python tools\qemu_check.py --vga std --secs 60 --stdin-script target\disk-a.txt --stdin-delay 6 `
+python dev-tools\qemu_check.py --vga std --secs 60 --stdin-script target\disk-a.txt --stdin-delay 6 `
     --qemu-arg=-device --qemu-arg=ich9-ahci,id=ahci `
     --qemu-arg=-drive --qemu-arg=id=vdisk,file=target\vault.img,if=none,format=raw `
     --qemu-arg=-device --qemu-arg=ide-hd,drive=vdisk,bus=ahci.0 `
@@ -350,26 +350,26 @@ python tools\qemu_check.py --vga std --secs 60 --stdin-script target\disk-a.txt 
     --expect "[SH] DISK PROBE assertions: 88 passed, 0 failed" `
     --expect "[SH] DISK USER SECTOR: 18 byte(s): \"KELLER-OS PERSISTS\"" `
     --expect "[SH] DISK JOURNAL: boots=1" --forbid LOCKDOWN
-python tools\qemu_check.py --vga std --secs 60 --stdin-script target\disk-b.txt --stdin-delay 6 `
+python dev-tools\qemu_check.py --vga std --secs 60 --stdin-script target\disk-b.txt --stdin-delay 6 `
     --qemu-arg=-device --qemu-arg=ich9-ahci,id=ahci `
     --qemu-arg=-drive --qemu-arg=id=vdisk,file=target\vault.img,if=none,format=raw `
     --qemu-arg=-device --qemu-arg=ide-hd,drive=vdisk,bus=ahci.0 `
     --expect "[OK] VAULT RESTORE: 2 sector(s) adopted from the image, generation 3" `
     --expect "[SH] DISK USER SECTOR: 18 byte(s): \"KELLER-OS PERSISTS\"" `
     --expect "[SH] DISK JOURNAL: boots=2" --forbid LOCKDOWN
-python tools\disk_check.py --img target\vault-a.img --later target\vault.img `
+python dev-tools\disk_check.py --img target\vault-a.img --later target\vault.img `
     --marker "KELLER-OS PERSISTS" --from-log target\disk-run-b.log
 
 # The mesh's transport on a real wire, checked from the other end of the cable: the adapter's
 # registers and rings read back out of the device, the framing layer's known-answer vector, then
 # an independent peer that validates every transmitted frame, matches one it typed byte for byte,
 # and injects frames whose refusal the guest's own counters have to account for exactly
-python tools\wire_check.py --secs 130
+python dev-tools\wire_check.py --secs 130
 
 # Ring-3 isolation, address spaces and preemption: 40 probe assertions, two faults contained at
 # CPL 3, a `jmp $` task preempted by the timer with zero syscalls, every frame returned, and the
 # shell still answering afterwards
-python tools\qemu_check.py --vga std --secs 30 --stdin-script target\ring3-input.txt `
+python dev-tools\qemu_check.py --vga std --secs 30 --stdin-script target\ring3-input.txt `
     --expect "[SH] RING-3 PROBE assertions: 40 passed, 0 failed" `
     --expect "[OK] RING-3 PREEMPTION PROOF: 'spin-probe' (jmp $) got the CPU" `
     --expect "[OK] RING-3 FAULT CONTAINMENT: 2 task(s) killed at CPL 3 (1 #PF, 1 #GP)" `
@@ -378,11 +378,11 @@ python tools\qemu_check.py --vga std --secs 30 --stdin-script target\ring3-input
     --forbid "LOCKDOWN" --forbid "unknown syscall" --forbid "state=ready" --forbid "idle_armed=true"
 
 # The mesh probe on its own: 12 assertions including shard-swap and Byzantine isolation
-python tools\qemu_check.py --secs 30 --stdin-script target\net-input.txt `
+python dev-tools\qemu_check.py --secs 30 --stdin-script target\net-input.txt `
     --expect "NET PROBE assertions: 12 passed, 0 failed" --expect "poisson-cover => PASS"
 
 # The GUI path end to end: display server up, both probes green, stack guard intact
-python tools\qemu_check.py --vga std --secs 45 --stdin-script target\gui-input.txt `
+python dev-tools\qemu_check.py --vga std --secs 45 --stdin-script target\gui-input.txt `
     --screendump target\gui.ppm --expect "[OK] GUI DISPLAY SERVER" `
     --expect "[SH] GUI PROBE: aperture round-trip=PASS + backbuffer/glyph/blit=PASS => PASS" `
     --expect "[SH] INPUT PROBE assertions: 21 passed, 0 failed" `
@@ -391,14 +391,14 @@ python tools\qemu_check.py --vga std --secs 45 --stdin-script target\gui-input.t
     --expect "SELF-TEST SUMMARY: 159 passed, 0 failed"
 
 # Real PS/2 input through the emulated 8042: aim, click, aim, click, then type a command
-python tools\qemu_check.py --vga std --secs 42 --stdin-script target\gui-input.txt `
+python dev-tools\qemu_check.py --vga std --secs 42 --stdin-script target\gui-input.txt `
     --type "input\n" --mouse 128,-184 --click left --mouse=-340,100 --click left `
     --expect "[PS2] mouse: bytes=27 packets=9" `
     --expect "[GUI] pointer: cursor=300,300 packets=9 clicks=2 motion=-212,84"
 
 # The capability gate: after Alt+Tab the focus is on KELLER VAULT, so the same keystrokes are
 # refused and the typed command never prints - routed=1 (the chord) against refused=4 (the text)
-python tools\qemu_check.py --vga std --secs 40 --stdin-script target\input-input.txt `
+python dev-tools\qemu_check.py --vga std --secs 40 --stdin-script target\input-input.txt `
     --key alt-tab --type "mem\n" --input-settle 26 --forbid "[SH] heap"
 
 # Proof that injection reached the kernel, not just "no symptom appeared": the harness asks the
@@ -406,11 +406,11 @@ python tools\qemu_check.py --vga std --secs 40 --stdin-script target\input-input
 # produce that evidence fails, however the --expect/--forbid patterns fall out. Here there is no
 # 8042 to deliver anything, so the guest says `[--] PS/2 CONTROLLER ABSENT` once, its counters
 # stay at zero (no phantom 0xFF reads), and the four injection checks fail - which is the point.
-python tools\qemu_check.py --vga std --secs 25 --qemu-arg=-machine --qemu-arg=pc,i8042=off `
+python dev-tools\qemu_check.py --vga std --secs 25 --qemu-arg=-machine --qemu-arg=pc,i8042=off `
     --mouse 40,-30 --click left --expect "[--] PS/2 CONTROLLER ABSENT" --expect "[OK] BOOT PROTOCOL"
 
 # 30 pixel-level assertions against the capture above (palette, rules, rectangles, cursor arrow)
-python tools\verify_gui.py --ppm target\gui.ppm --png target\gui.png `
+python dev-tools\verify_gui.py --ppm target\gui.ppm --png target\gui.png `
     --html target\gui-preview.html --cursor 300,300
 ```
 The aggregate count grows only on a machine with a display adapter (QEMU provides a standard VGA
@@ -456,6 +456,6 @@ window a click focuses the tile under the pointer while `Alt + Tab` cycles focus
 
 ### Bochs Strict Hardware Emulation
 ```bash
-bochs -f bochsrc.txt
+bochs -f dev-tools\bochsrc.txt
 ```
 Simulates hardware register states, memory boundaries, and cycle-accurate execution.

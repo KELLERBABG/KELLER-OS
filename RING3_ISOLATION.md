@@ -260,7 +260,7 @@ reports) and two are the boot probe's and the self-test probe's `exit`.
 
 ```powershell
 # Boot probe (part of every run): CPL 3 entry, syscall door, clean exit, frames returned
-python tools\qemu_check.py --vga std --secs 45 --stdin-script target\full-input.txt `
+python dev-tools\qemu_check.py --vga std --secs 45 --stdin-script target\full-input.txt `
     --expect "[OK] RING-3 ENTRY: 'keller-hello' ran at CPL=3" `
     --expect "[R3 keller-hello] RING-3 HELLO: this line was printed at CPL=3" `
     --expect "[OK] RING-3 PROBE COMPLETE: address space torn down, paging frames 0 -> 0" `
@@ -268,12 +268,12 @@ python tools\qemu_check.py --vga std --secs 45 --stdin-script target\full-input.
 
 # The probe assertions: gate DPL, GDT privilege, port-IO denial, frame layout, address-space
 # separation, and one live entry into ring 3
-python tools\qemu_check.py --vga std --secs 30 --stdin-script target\ring3-input.txt `
+python dev-tools\qemu_check.py --vga std --secs 30 --stdin-script target\ring3-input.txt `
     --expect "[SH] RING-3 PROBE assertions: 40 passed, 0 failed" `
     --expect "[SH] RING-3 EMPIRICAL: 'ring3-selftest' state=exited cs=0x1b"
 
 # The phase: two faults contained, preemption proven, everything torn down, kernel still answering
-python tools\qemu_check.py --vga std --secs 30 --stdin-script target\ring3-input.txt `
+python dev-tools\qemu_check.py --vga std --secs 30 --stdin-script target\ring3-input.txt `
     --expect "[!!] RING-3 CONTAINMENT: 'sandbox-port' #GP general protection (vector 13, error=0x0) at rip=0x0000004000000005 cs=0x1b" `
     --expect "[R3 sandbox-peer] write(0x100000, 8) refused: EFAULT" `
     --expect "[!!] RING-3 CONTAINMENT: 'sandbox-peer' #PF page fault (vector 14, error=0x4) at rip=0x0000004000000011 cs=0x1b" `
