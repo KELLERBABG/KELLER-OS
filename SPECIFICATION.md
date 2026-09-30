@@ -204,7 +204,7 @@ bring-up window set yet (see [`GUI_SPECIFICATION.md`](GUI_SPECIFICATION.md) §6)
 ```
 
 ### 5.3 Rasterizer & Font Subsystem
-* Embedded 8x16 monospaced ASCII bitmap font in `.rodata` for zero-allocation text rendering: `FONT_8X16: [u8; 256 * 16]` in [`src/gui/font.rs`](src/gui/font.rs), baked by [` dev-tools/make_font.py`](dev- dev-tools/make_font.py) from CascadiaMono.ttf (SIL OFL 1.1).
+* Embedded 8x16 monospaced ASCII bitmap font in `.rodata` for zero-allocation text rendering: `FONT_8X16: [u8; 256 * 16]` in [`src/gui/font.rs`](src/gui/font.rs), baked by [`dev-tools/make_font.py`](dev-tools/make_font.py) from CascadiaMono.ttf (SIL OFL 1.1).
 * Double-buffered backbuffer (3 MiB `Vec<u32>` in the heap) to eliminate tearing without GPU interrupts; only dirty rectangles are copied to the aperture.
 * Fixed 100 ms refresh slot driven from the idle loop, so a repaint never runs in an interrupt and never allocates.
 * Mask on panic ensures zero visual persistence on LCD/CRT panels (`fb::scrub_hook`); verified by capturing the screen after `panic` and finding all 786432 pixels black.
@@ -270,19 +270,29 @@ KELLER-OS/
 │       └── grub.cfg            # Multiboot2 bootloader configuration
 ├── src/
 │   ├── arch/
+│   │   ├── acpi.rs             # RSDP/XSDT walk, MADT + MCFG parsing, processor enumeration
+│   │   ├── ahci.rs             # SATA HBA bring-up, PRDT DMA, sector read/write, adapter self-test
 │   │   ├── cpu.rs              # CR0/CR4 bring-up, RDRAND/CPUID, cli/sti/hlt
-│   │   ├── gdt.rs              # GDT + TSS with a dedicated IST stack
+│   │   ├── gdt.rs              # GDT + per-CPU TSS with dedicated IST stacks
 │   │   ├── idt.rs              # 256 interrupt gates, XMM-safe stubs, dispatch
+│   │   ├── ioapic.rs           # Redirection entries, GSI routing, the 8259 masked behind it
+│   │   ├── lapic.rs            # Local APIC, calibrated timer, self-IPI, EOI
+│   │   ├── mod.rs              # arch bring-up order
+│   │   ├── msi.rs              # MSI/MSI-X capability probe and message-page delivery
+│   │   ├── paging.rs           # Per-process PML4, 4 GiB identity map, frame accounting
 │   │   ├── pic.rs              # 8259 remap to 32-47, PIT at 100 Hz
-│   │   └── mod.rs              # arch bring-up order
+│   │   ├── ps2.rs              # 8042: set-1 scancodes, 3/4-byte mouse packets, IntelliMouse
+│   │   └── smp.rs              # INIT-SIPI-SIPI trampoline, per-CPU state, pinned ChaCha20 KAT
+│   ├── block.rs               # Sector layer between the vault image format and the disk
 │   ├── boot.rs                 # global_asm! bootstrap: Multiboot2 + PVH notes, 4 GiB map, 256 KiB stack + guard band
 │   ├── bootinfo.rs             # PVH/Multiboot1/Multiboot2 handoff parser, memory map, framebuffer tag
 │   ├── clock.rs                # PIT tick counter, uptime in ms
 │   ├── crypto.rs               # RFC 8439 AEAD, HMAC/HKDF, RS + Shamir, GHOST blob, KATs
+│   ├── eth.rs                  # Ethernet/IPv4/UDP framing, checksums, ARP responder, known-answer test
 │   ├── fb.rs                   # Framebuffer: handoff adoption, BGA mode set, pixel/span/blit/scrub
 │   ├── gui/
 │   │   ├── canvas.rs           # Rasteriser and palette: rectangles, borders, lines, 8x16 text
-│   │   ├── font.rs            # Baked 4096-byte glyph table (generated, do not edit)
+│   │   ├── font.rs             # Baked 4096-byte glyph table (generated, do not edit)
 │   │   └── mod.rs              # Display server: console mirror, window slots, dirty-rect blits
 │   ├── integrity.rs            # FNV1a-64 self-measurement of .text
 │   ├── ipc.rs                  # HMAC-SHA256 verified IPC queue
@@ -290,14 +300,18 @@ KELLER-OS/
 │   ├── main.rs                 # Kernel entry, allocator, boot order, idle loop
 │   ├── mm.rs                   # Coalescing free-list allocator
 │   ├── net.rs                  # Vantablack mesh: ShardSec frames, Byzantine isolation, cover traffic
+│   ├── nic.rs                  # Intel 8254x (e1000): DMA descriptor rings, MAC, ARP replies, counters
 │   ├── panic.rs                # 3-pass memory wipe, scrub hooks, lockdown
 │   ├── pci.rs                  # Config space, bus enumeration, BAR sizing/assignment, VGA lookup
 │   ├── port.rs                 # Port I/O primitives
+│   ├── proc.rs                 # Process table, per-task address spaces, fault retirement
 │   ├── sched.rs                # Fixed-slot scheduler with temporal isolation
 │   ├── serial.rs               # 16550 UART driver, RX ring, console macros, GUI log mirror
 │   ├── session.rs              # 128-bit sliding replay window + ms timeouts
 │   ├── shell.rs                # COM1 line editor and command dispatch
-│   └── vault.rs                # RS-sharded root secret + per-sector AEAD
+│   ├── storage.rs              # Vault image format, superblock, records, journal
+│   ├── vault.rs                # RS-sharded root secret + per-sector AEAD
+│   └── zk.rs                   # Schnorr proofs, GHOST blobs, the unlock gate
 ├── dev-tools/                  # Development-only helpers: not needed to build or boot the kernel
 │   ├── bochsrc.txt             # Bochs emulator hardware profile
 │   ├── disk_check.py           # Independent reader for a vault image: geometry, framing, no plaintext
@@ -312,7 +326,7 @@ KELLER-OS/
 ├── Cargo.toml                  # Package manifest & profile optimizations
 ├── CRYPTOGRAPHY_DEEP_DIVE.md   # Mathematical & Global Mesh Cryptographic Deep Dive
 ├── GUI_SPECIFICATION.md        # Dedicated Graphical Subsystem Specification
-├── index.html                  # Landing page & architecture visualizer
+├── index.html                  # Landing page for kernel.kellersystems.dev
 ├── KELLER OS.canvas            # Obsidian master architectural canvas
 ├── run.ps1                     # QEMU launch and debug harness
 ├── rust-toolchain.toml         # Nightly channel & component configuration

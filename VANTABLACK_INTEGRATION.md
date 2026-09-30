@@ -175,7 +175,7 @@ raw BAR today would hand it the whole physical address space, which is the oppos
 would be sitting on. The plumbing that split needs is already in place (the rings are ordinary frames,
 MMIO goes through one window, and the ports plus DMA addresses are the only things a grant would have
 to cover), so the move is a sandbox boundary rather than a rewrite. Full design, the descriptor rules
-that were bugs first, and the independent "[`dev- dev-tools/wire_check.py`](dev- dev-tools/wire_check.py)"
+that were bugs first, and the independent "[`dev-tools/wire_check.py`](dev-tools/wire_check.py)"
 peer that validates every frame from the other end of the cable: [`NIC_WIRE.md`](NIC_WIRE.md).
 
 ### 3.4 Poisson Cover Traffic
