@@ -1,512 +1,538 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>KELLER-OS | Bare-Metal Sovereign Microkernel &amp; Hypervisor</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <style>
-    :root {
-      --bg: #030712;
-      --card-bg: rgba(15, 23, 42, 0.7);
-      --border: rgba(99, 102, 241, 0.22);
-      --border-bright: rgba(99, 102, 241, 0.6);
-      --accent: #6366f1;
-      --accent-glow: rgba(99, 102, 241, 0.35);
-      --cyan: #06b6d4;
-      --text: #f8fafc;
-      --muted: #94a3b8;
-    }
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body {
-      background-color: var(--bg);
-      color: var(--text);
-      font-family: 'Space Grotesk', sans-serif;
-      overflow-x: hidden;
-      line-height: 1.6;
-    }
-    #bg-canvas {
-      position: fixed;
-      top: 0; left: 0;
-      width: 100vw; height: 100vh;
-      z-index: 0;
-      pointer-events: none;
-    }
-    .wrapper {
-      position: relative;
-      z-index: 10;
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 3rem 2rem 6rem;
-    }
-    nav {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 4rem;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 1.5rem;
-    }
-    .logo-block {
-      display: flex;
-      align-items: center;
-      gap: 1.25rem;
-      text-decoration: none;
-      color: inherit;
-    }
-    .logo-img {
-      width: 48px;
-      height: 48px;
-      border-radius: 10px;
-      border: 1px solid var(--border-bright);
-      background: rgba(0,0,0,0.6);
-      box-shadow: 0 0 16px var(--accent-glow);
-    }
-    .brand-title {
-      font-size: 1.3rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-    }
-    .brand-sub {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem;
-      color: var(--accent);
-      letter-spacing: 0.05em;
-    }
-    .nav-links a {
-      color: var(--muted);
-      text-decoration: none;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.85rem;
-      margin-left: 2rem;
-      transition: color 0.2s;
-    }
-    .nav-links a:hover { color: var(--accent); }
-    .hero {
-      display: grid;
-      grid-template-columns: 1.2fr 1fr;
-      gap: 3rem;
-      align-items: center;
-      margin-bottom: 5rem;
-    }
-    .badge-bar {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      background: rgba(99, 102, 241, 0.1);
-      border: 1px solid var(--border);
-      border-radius: 9999px;
-      padding: 0.35rem 1rem;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem;
-      color: var(--accent);
-      margin-bottom: 1.5rem;
-    }
-    .hero h1 {
-      font-size: 3.5rem;
-      font-weight: 700;
-      line-height: 1.08;
-      letter-spacing: -0.04em;
-      margin-bottom: 1.5rem;
-    }
-    .hero h1 span {
-      background: linear-gradient(135deg, #818cf8 0%, #6366f1 50%, #06b6d4 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    .hero p {
-      font-size: 1.15rem;
-      color: var(--muted);
-      margin-bottom: 2.5rem;
-      max-width: 580px;
-    }
-    .btn-row {
-      display: flex;
-      gap: 1rem;
-      flex-wrap: wrap;
-    }
-    .btn-primary {
-      background: var(--accent);
-      color: #ffffff;
-      font-family: 'JetBrains Mono', monospace;
-      font-weight: 700;
-      font-size: 0.85rem;
-      padding: 0.85rem 1.6rem;
-      border-radius: 6px;
-      text-decoration: none;
-      transition: all 0.2s;
-      box-shadow: 0 0 20px var(--accent-glow);
-    }
-    .btn-primary:hover {
-      background: #4f46e5;
-      transform: translateY(-2px);
-      box-shadow: 0 0 30px var(--accent);
-    }
-    .btn-secondary {
-      background: rgba(15, 23, 42, 0.8);
-      color: var(--text);
-      border: 1px solid var(--border);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.85rem;
-      padding: 0.85rem 1.6rem;
-      border-radius: 6px;
-      text-decoration: none;
-      transition: all 0.2s;
-    }
-    .btn-secondary:hover { border-color: var(--accent); }
-    .hero-card {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 1.75rem;
-      backdrop-filter: blur(12px);
-      box-shadow: 0 20px 50px rgba(0,0,0,0.5);
-    }
-    .panel-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 0.75rem;
-      margin-bottom: 1.25rem;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem;
-      color: var(--muted);
-    }
-    .telemetry-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-      margin-bottom: 1.5rem;
-    }
-    .telemetry-item {
-      background: rgba(3, 7, 18, 0.7);
-      border: 1px solid var(--border);
-      padding: 0.9rem;
-      border-radius: 8px;
-    }
-    .telemetry-label {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.65rem;
-      color: var(--muted);
-      text-transform: uppercase;
-      margin-bottom: 0.25rem;
-    }
-    .telemetry-val {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: var(--text);
-    }
-    .telemetry-val.accent { color: var(--accent); }
-    .section-title {
-      font-size: 2rem;
-      font-weight: 700;
-      letter-spacing: -0.03em;
-      margin-bottom: 0.75rem;
-    }
-    .section-sub {
-      color: var(--muted);
-      margin-bottom: 2.5rem;
-      max-width: 650px;
-    }
-    .grid-3 {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 1.5rem;
-      margin-bottom: 5rem;
-    }
-    .card {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 1.75rem;
-      backdrop-filter: blur(10px);
-      transition: all 0.2s;
-    }
-    .card:hover {
-      border-color: var(--accent);
-      transform: translateY(-3px);
-    }
-    .card h3 {
-      font-size: 1.15rem;
-      margin-bottom: 0.75rem;
-      letter-spacing: -0.01em;
-    }
-    .card p {
-      font-size: 0.9rem;
-      color: var(--muted);
-      line-height: 1.5;
-    }
-    .code-terminal {
-      background: #020617;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      overflow: hidden;
-      margin-bottom: 5rem;
-    }
-    .terminal-bar {
-      background: #090e17;
-      padding: 0.6rem 1rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid var(--border);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem;
-      color: var(--muted);
-    }
-    .copy-btn {
-      background: transparent;
-      border: 1px solid var(--border);
-      color: var(--accent);
-      padding: 0.25rem 0.6rem;
-      border-radius: 4px;
-      font-size: 0.7rem;
-      cursor: pointer;
-      font-family: 'JetBrains Mono', monospace;
-    }
-    .copy-btn:hover { background: rgba(99,102,241,0.2); }
-    pre {
-      padding: 1.5rem;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.85rem;
-      color: #cbd5e1;
-      overflow-x: auto;
-      line-height: 1.7;
-    }
-    .table-section {
-      margin-bottom: 5rem;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    th, td {
-      padding: 1rem 1.25rem;
-      text-align: left;
-      font-size: 0.9rem;
-      border-bottom: 1px solid var(--border);
-    }
-    th {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem;
-      color: var(--muted);
-      background: rgba(0,0,0,0.4);
-      text-transform: uppercase;
-    }
-    footer {
-      border-top: 1px solid var(--border);
-      padding-top: 2rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem;
-      color: var(--muted);
-    }
-    @media (max-width: 900px) {
-      .hero { grid-template-columns: 1fr; }
-      .grid-3 { grid-template-columns: 1fr; }
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KELLER-OS — Sovereign x86_64 Microkernel</title>
+<meta name="description" content="KELLER-OS is a bare-metal x86_64 microkernel in Rust: PVH direct boot, Local APIC and IO-APIC, application processors brought up by INIT-SIPI-SIPI, capability-based ring-3 isolation, an AHCI vault that must prove itself before it opens, and a verification harness that checks the wire and the disk from outside the guest.">
+<meta name="theme-color" content="#030712">
+<meta property="og:type" content="website">
+<meta property="og:title" content="KELLER-OS — Sovereign x86_64 Microkernel">
+<meta property="og:description" content="A bare-metal x86_64 microkernel in Rust, with a verification harness that checks the kernel from outside the guest.">
+<meta property="og:image" content="assets/banner.svg">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<style>
+  /* The palette is the kernel's own: src/gui/canvas.rs paints these exact RGB values
+     into the framebuffer, so the site and the display server share one colour system. */
+  :root {
+    --bg: #030712;
+    --panel: #0f172a;
+    --chrome: #1b2438;
+    --line: #1e2938;
+    --line-strong: #2b3a51;
+    --accent: #6366f1;
+    --accent-fill: #4f46e5;
+    --accent-ink: #a5b4fc;
+    --text: #f8fafc;
+    --dim: #94a3b8;
+    --secure: #10b981;
+    --sans: ui-sans-serif, -apple-system, "Segoe UI Variable Display", "Segoe UI", Roboto, Inter, system-ui, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", "Cascadia Code", "SF Mono", "JetBrains Mono", Consolas, "Liberation Mono", monospace;
+    --measure: 68ch;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  a { color: var(--accent-ink); text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent-ink);
+    outline-offset: 3px;
+  }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 2rem 6rem; }
+
+  /* ---------- top bar ---------- */
+  .topbar {
+    display: flex; align-items: center; gap: 1.5rem;
+    padding: 1.5rem 0 1.25rem;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 4.5rem;
+  }
+  .mark { display: flex; align-items: center; gap: .7rem; color: inherit; }
+  .mark:hover { text-decoration: none; }
+  .mark img { width: 30px; height: 30px; display: block; }
+  .mark-name { font-weight: 650; letter-spacing: -.01em; }
+  .mark-version {
+    font-family: var(--mono); font-size: .7rem; color: var(--dim);
+    border-left: 1px solid var(--line-strong); padding-left: .9rem; margin-left: .4rem;
+  }
+  .topbar nav { margin-left: auto; display: flex; gap: 1.5rem; }
+  .topbar nav a {
+    font-family: var(--mono); font-size: .78rem; color: var(--dim);
+    letter-spacing: .02em;
+  }
+  .topbar nav a:hover { color: var(--text); text-decoration: none; }
+
+  /* ---------- hero ---------- */
+  .hero {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 4rem; align-items: start; margin-bottom: 6rem;
+  }
+  .eyebrow {
+    font-family: var(--mono); font-size: .74rem; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--dim); margin-bottom: 1.25rem;
+  }
+  .hero h1 {
+    font-size: clamp(2.1rem, 4.4vw, 3.05rem);
+    line-height: 1.1; letter-spacing: -.035em; font-weight: 660;
+    margin-bottom: 1.25rem; text-wrap: balance;
+  }
+  .hero h1 em { font-style: normal; color: var(--accent-ink); }
+  .lede {
+    color: var(--dim); font-size: 1.05rem; max-width: var(--measure);
+    margin-bottom: 2rem;
+  }
+  .actions { display: flex; flex-wrap: wrap; gap: .75rem; }
+  .btn {
+    display: inline-flex; align-items: center; gap: .5rem;
+    font-family: var(--mono); font-size: .78rem; font-weight: 600;
+    letter-spacing: .08em; text-transform: uppercase;
+    padding: .8rem 1.15rem; border-radius: 3px;
+    border: 1px solid var(--line-strong); color: var(--text);
+    background: transparent; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); background: #0b1220; text-decoration: none; }
+  .btn--primary { background: var(--accent-fill); border-color: var(--accent-fill); color: #fff; }
+  .btn--primary:hover { background: #5b52f0; border-color: #5b52f0; }
+
+  /* ---------- transcript ---------- */
+  .transcript {
+    border: 1px solid var(--line); border-radius: 3px;
+    background: #060b14; overflow: hidden;
+  }
+  .transcript-head {
+    display: flex; align-items: baseline; gap: .6rem;
+    padding: .7rem .9rem; border-bottom: 1px solid var(--line);
+    background: var(--chrome);
+    font-family: var(--mono); font-size: .7rem; color: var(--dim);
+  }
+  .transcript-head b { color: var(--text); font-weight: 600; letter-spacing: .04em; }
+  .transcript pre {
+    margin: 0; padding: 1rem .9rem; overflow-x: auto;
+    font-family: var(--mono); font-size: .735rem; line-height: 1.85;
+    color: #cbd5e1; white-space: pre; tab-size: 2;
+  }
+  .transcript .ok { color: var(--secure); }
+  .transcript .sh { color: var(--accent-ink); }
+  .transcript .note { color: #64748b; }
+
+  /* ---------- sections ---------- */
+  section { margin-bottom: 5.5rem; }
+  .section-head { border-top: 1px solid var(--line); padding-top: 1.25rem; margin-bottom: 2.25rem; }
+  h2 { font-size: 1.45rem; font-weight: 640; letter-spacing: -.02em; margin-bottom: .4rem; }
+  .section-note { color: var(--dim); font-size: .95rem; max-width: var(--measure); }
+
+  /* ---------- specification list ---------- */
+  .spec-list { border-top: 1px solid var(--line); }
+  .spec-row {
+    display: grid; grid-template-columns: 210px 1fr; gap: 1.5rem;
+    padding: 1.1rem 0; border-bottom: 1px solid var(--line);
+  }
+  .spec-key {
+    font-family: var(--mono); font-size: .78rem; color: var(--accent-ink);
+    padding-top: .15rem;
+  }
+  .spec-val { color: var(--dim); font-size: .95rem; }
+  .spec-val strong { color: var(--text); font-weight: 560; }
+
+  /* ---------- measurements ---------- */
+  .measure { width: 100%; border-collapse: collapse; font-size: .93rem; }
+  .measure caption {
+    text-align: left; color: var(--dim); font-size: .85rem;
+    padding-bottom: .9rem;
+  }
+  .measure th, .measure td {
+    text-align: left; padding: .7rem 1rem .7rem 0;
+    border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  .measure th {
+    font-family: var(--mono); font-size: .7rem; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--dim); font-weight: 500;
+  }
+  .measure td:first-child { color: var(--text); }
+  .measure td.num { font-family: var(--mono); font-size: .84rem; color: var(--accent-ink); white-space: nowrap; }
+  .measure td:last-child { color: var(--dim); }
+  .footnote { color: var(--dim); font-size: .85rem; margin-top: 1rem; max-width: var(--measure); }
+  .footnote code { font-family: var(--mono); font-size: .95em; color: #cbd5e1; }
+
+  /* ---------- commands ---------- */
+  .cmd {
+    border: 1px solid var(--line); border-radius: 3px;
+    background: #060b14; margin: 1.25rem 0;
+  }
+  .cmd-head {
+    display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+    padding: .55rem .8rem; border-bottom: 1px solid var(--line);
+    background: var(--chrome);
+    font-family: var(--mono); font-size: .7rem; color: var(--dim);
+  }
+  .cmd pre {
+    margin: 0; padding: .9rem; overflow-x: auto;
+    font-family: var(--mono); font-size: .78rem; line-height: 1.75; color: #dbe3ee;
+    white-space: pre;
+  }
+  .cmd button {
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--dim);
+    background: transparent; border: 1px solid var(--line-strong);
+    border-radius: 2px; padding: .2rem .5rem; cursor: pointer;
+  }
+  .cmd button:hover { color: var(--text); border-color: var(--accent); }
+
+  .steps { counter-reset: step; list-style: none; }
+  .steps > li {
+    counter-increment: step; position: relative;
+    padding-left: 2.5rem; margin-bottom: .5rem;
+  }
+  .steps > li::before {
+    content: counter(step);
+    position: absolute; left: 0; top: .1rem;
+    font-family: var(--mono); font-size: .74rem; color: var(--accent-ink);
+    border: 1px solid var(--line-strong); border-radius: 2px;
+    width: 1.55rem; height: 1.55rem; display: grid; place-items: center;
+  }
+  .steps > li > strong { font-weight: 560; }
+
+  /* ---------- docs ---------- */
+  .doc-list {
+    list-style: none; display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .6rem 2.5rem;
+  }
+  .doc-list a { font-family: var(--mono); font-size: .82rem; }
+  .doc-list span { color: var(--dim); font-size: .88rem; display: block; font-family: var(--sans); }
+
+  footer {
+    border-top: 1px solid var(--line); padding-top: 1.5rem;
+    display: flex; justify-content: space-between; gap: 1.5rem; flex-wrap: wrap;
+    font-family: var(--mono); font-size: .74rem; color: var(--dim);
+  }
+  footer a { color: var(--dim); }
+  footer a:hover { color: var(--text); }
+
+  @media (max-width: 880px) {
+    .wrap { padding: 0 1.25rem 4rem; }
+    .hero { grid-template-columns: 1fr; gap: 2.5rem; margin-bottom: 4rem; }
+    .topbar { flex-wrap: wrap; gap: .75rem 1.25rem; margin-bottom: 3rem; }
+    .topbar nav { margin-left: 0; width: 100%; gap: 1.25rem; }
+    .spec-row { grid-template-columns: 1fr; gap: .35rem; }
+    .doc-list { grid-template-columns: 1fr; }
+    section { margin-bottom: 4rem; }
+  }
+</style>
 </head>
 <body>
-  <canvas id="bg-canvas"></canvas>
-  <div class="wrapper">
+<div class="wrap">
+
+  <header class="topbar">
+    <a class="mark" href="https://kellersystems.dev">
+      <img src="assets/icon.svg" alt="" width="30" height="30">
+      <span class="mark-name">KELLER-OS</span>
+      <span class="mark-version">x86_64 &middot; no_std</span>
+    </a>
     <nav>
-      <a href="https://kellersystems.dev" class="logo-block">
-        <img src="assets/icon.svg" alt="KELLER-OS Vector Icon" class="logo-img">
-        <div>
-          <div class="brand-title">KELLER-OS</div>
-          <div class="brand-sub">SOVEREIGN BARE-METAL KERNEL</div>
-        </div>
-      </a>
-      <div class="nav-links">
-        <a href="#kernel">Microkernel</a>
-        <a href="#capabilities">Capabilities</a>
-        <a href="#quickstart">Quickstart</a>
-        <a href="https://github.com/KELLERBABG/KELLER-OS">GitHub</a>
-      </div>
+      <a href="#kernel">Microkernel</a>
+      <a href="#proof">Verification</a>
+      <a href="#quickstart">Quickstart</a>
+      <a href="https://github.com/KELLERBABG/KELLER-OS">GitHub</a>
     </nav>
+  </header>
+
+  <main>
 
     <section class="hero">
       <div>
-        <div class="badge-bar">
-          <span>●</span> ALLOCATION-FREE x86_64 CAPABILITY KERNEL
-        </div>
-        <h1>Sovereign <span>Bare-Metal</span> Microkernel Runtime</h1>
-        <p>
-          Custom x86_64 bootloader and pure Rust `#![no_std]` capability-based microkernel. Enforces zero dynamic heap allocation in kernel space, cryptographic vault isolation, and formal ring-0 invariant protection.
+        <p class="eyebrow">Bare-metal x86_64 &middot; Rust &middot; no_std</p>
+        <h1>A microkernel that boots to ring&nbsp;3 and <em>proves it</em>.</h1>
+        <p class="lede">
+          KELLER-OS boots as a PVH ELF straight into long mode, replaces the 8259 with a Local
+          APIC and an IO-APIC, starts its application processors with INIT-SIPI-SIPI, and drops
+          into an unprivileged task whose own CPU frame testifies that it runs at CPL&nbsp;3.
+          The harness around it is not the guest marking its own homework: a separate process
+          reads the wire, the disk image and the framebuffer from outside.
         </p>
-        <div class="btn-row">
-          <a href="#quickstart" class="btn-primary">GET STARTED</a>
-          <a href="https://github.com/KELLERBABG/KELLER-OS" class="btn-secondary">SOURCE CODE</a>
+        <div class="actions">
+          <a class="btn btn--primary" href="#quickstart">Build &amp; boot it</a>
+          <a class="btn" href="https://github.com/KELLERBABG/KELLER-OS">Source</a>
         </div>
       </div>
 
-      <div class="hero-card">
-        <div class="panel-header">
-          <span>RING-0 KERNEL TELEMETRY</span>
+      <div class="transcript">
+        <div class="transcript-head">
+          <b>COM1</b>
+          <span>verbatim lines from a run on this machine</span>
         </div>
-        <div class="telemetry-grid">
-          <div class="telemetry-item">
-            <div class="telemetry-label">Architecture</div>
-            <div class="telemetry-val accent">x86_64 Pure</div>
-          </div>
-          <div class="telemetry-item">
-            <div class="telemetry-label">Dynamic Allocations</div>
-            <div class="telemetry-val">0 Bytes (Zero-Heap)</div>
-          </div>
-          <div class="telemetry-item">
-            <div class="telemetry-label">IPC Roundtrip</div>
-            <div class="telemetry-val accent">182 CPU Cycles</div>
-          </div>
-          <div class="telemetry-item">
-            <div class="telemetry-label">Boot Target</div>
-            <div class="telemetry-val">Multiboot2 / GRUB</div>
-          </div>
-        </div>
-        <div style="font-family:'JetBrains Mono',monospace; font-size:0.75rem; color:var(--muted); line-height:1.7;">
-          <div>&gt; [BOOT.S] Protected mode to long mode 64-bit transition OK</div>
-          <div>&gt; [IDT] Interrupt Descriptor Table initialized (32 hardware vectors)</div>
-          <div>&gt; [VAULT] Hardware enclave capability registers bound</div>
-          <div>&gt; [NET] Sovereign peer routing network adapter online</div>
-        </div>
+        <pre><span class="ok">[OK]</span> PIT TIMER LIVE: 21 ticks / ~210 ms (0 lost)
+<span class="ok">[OK]</span> APIC SELF-TEST: 16 assertions passed, 0 failed
+<span class="ok">[OK]</span> IOAPIC SELF-TEST: 14 assertions passed, 0 failed
+<span class="ok">[OK]</span> SMP SELF-TEST: 15 assertions passed, 0 failed, 0 skipped
+<span class="note">[--]</span> MSI: 00:03.0 has no MSI capability (capabilities: none)
+     - its interrupt line is the IO-APIC's problem
+<span class="ok">[OK]</span> RING-3 ENTRY: 'keller-hello' ran at CPL=3
+     - the CPU's own frame says cs=0x1b ss=0x23, cr3=0x70b000
+<span class="ok">[OK]</span> GUI DISPLAY SERVER: 3072 KiB backbuffer, 8 window slots
+<span class="ok">[OK]</span> PS/2 MOUSE WHEEL: IntelliMouse negotiated (id 0x03)
+<span class="ok">[OK]</span> SOVEREIGN-CORE BOOT COMPLETE - IDLE LOOP ENTERED
+<span class="sh">[SH]</span> SELF-TEST SUMMARY: 161 passed, 0 failed, 20 skipped
+     (checks that need hardware this machine does not have)</pre>
       </div>
     </section>
 
     <section id="kernel">
-      <h2 class="section-title">Fundamental Kernel Principles</h2>
-      <p class="section-sub">
-        Eliminating monolithic kernel attack surfaces: KELLER-OS enforces formal capability limits and zero unbounded loops.
-      </p>
-      <div class="grid-3">
-        <div class="card">
-          <h3>Allocation-Free Core</h3>
-          <p>
-            The entire core microkernel operates without dynamic memory allocators. All stacks, descriptor tables, and IPC buffers are statically bound at link time.
-          </p>
+      <div class="section-head">
+        <h2>What is actually in the kernel</h2>
+        <p class="section-note">
+          Every line below is a module in <code>src/</code> with a self-test that runs at boot
+          and reports what it measured, including the hardware this machine does not have.
+        </p>
+      </div>
+
+      <div class="spec-list">
+        <div class="spec-row">
+          <div class="spec-key">arch/lapic.rs</div>
+          <div class="spec-val">
+            The Local APIC's timer is <strong>calibrated against the PIT, not against arithmetic</strong>.
+            The reload the clock arithmetic predicts does not survive being measured on QEMU, so the
+            kernel probes a ladder of reloads, confirms the winner, and re-arms from its own handler.
+          </div>
         </div>
-        <div class="card">
-          <h3>Cryptographic Vault Enclaves</h3>
-          <p>
-            Isolated execution domains communicate solely through unforgeable 256-bit cryptographic capability tokens verified by hardware MMU page tables.
-          </p>
+        <div class="spec-row">
+          <div class="spec-key">arch/ioapic.rs</div>
+          <div class="spec-val">
+            Interrupts are routed through the IO-APIC with <strong>the 8259 masked behind it</strong>:
+            24 redirection entries written and read back, the timer delivered through the controller.
+          </div>
         </div>
-        <div class="card">
-          <h3>QEMU &amp; Bochs Test Harness</h3>
-          <p>
-            Fully reproducible automated headless VM validation verifies register state preservation across interrupt returns and context switches.
-          </p>
+        <div class="spec-row">
+          <div class="spec-key">arch/smp.rs</div>
+          <div class="spec-val">
+            Application processors are woken with INIT-SIPI-SIPI and handed their own GDT, TSS and
+            IST stack. Each one hashes a fixed workload and must agree on
+            <strong>5fa184c8&hellip;78ec</strong> &mdash; a hash no AP can fake by running a different code path.
+          </div>
+        </div>
+        <div class="spec-row">
+          <div class="spec-key">paging.rs &middot; idt.rs</div>
+          <div class="spec-val">
+            Per-process PML4s mean two tasks can use identical virtual addresses and reach different
+            frames, so a cross-space read is a <strong>not-present page fault</strong> rather than a check the
+            kernel has to remember to make. <code>int 0x80</code> is the only DPL-3 gate in the table.
+          </div>
+        </div>
+        <div class="spec-row">
+          <div class="spec-key">crypto.rs &middot; zk.rs</div>
+          <div class="spec-val">
+            RFC 8439 ChaCha20-Poly1305, HMAC/HKDF, Reed-Solomon, Shamir 2-of-3 sharing and Schnorr
+            proofs, all implemented in-tree with known-answer tests instead of a dependency tree.
+          </div>
+        </div>
+        <div class="spec-row">
+          <div class="spec-key">storage.rs &middot; ahci.rs</div>
+          <div class="spec-val">
+            A real SATA disk carries the sealed vault, and the image is opened <strong>only after a proof
+            has been checked against both the owner commitment and the header on the medium</strong>.
+            A host-side reader then confirms independently that no plaintext is on the platter.
+          </div>
+        </div>
+        <div class="spec-row">
+          <div class="spec-key">nic.rs &middot; eth.rs</div>
+          <div class="spec-val">
+            An Intel 82540EM with DMA descriptor rings puts sealed 576-byte frames on the segment as
+            Ethernet/IPv4/UDP datagrams, answers ARP for its own address, and is validated frame by
+            frame by a <strong>separate process acting as its peer</strong>.
+          </div>
+        </div>
+        <div class="spec-row">
+          <div class="spec-key">gui/</div>
+          <div class="spec-val">
+            A 1024&times;768&times;32 framebuffer display server with 8 window slots, dirty-rectangle blits on
+            a fixed 100&nbsp;ms refresh, click-to-focus routed through the window's capability, and a
+            256-line console ring that you can scroll with PageUp, PageDown or the mouse wheel.
+          </div>
         </div>
       </div>
     </section>
 
-    <section id="comparison" class="table-section">
-      <h2 class="section-title">Comparative Architecture</h2>
-      <p class="section-sub">Traditional monolithic kernels (Linux/BSD) vs. KELLER-OS sovereign microkernel.</p>
-      <table>
+    <section id="proof">
+      <div class="section-head">
+        <h2>Verification, not adjectives</h2>
+        <p class="section-note">
+          The harness boots the kernel under QEMU, drives the shell over COM1, injects real keyboard
+          and pointer input through the emulated 8042, and then checks the guest's account of every
+          event it injected. Numbers below are from runs on this machine.
+        </p>
+      </div>
+
+      <table class="measure">
+        <caption>Measured on QEMU 11 with <code style="font-family:var(--mono)">-cpu max</code>, 4 cores where noted.</caption>
         <thead>
           <tr>
-            <th>Characteristic</th>
-            <th>Monolithic Linux / Darwin</th>
-            <th>KELLER-OS Microkernel</th>
+            <th scope="col">Check</th>
+            <th scope="col">Result</th>
+            <th scope="col">What it means</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td>Ring-0 Codebase Size</td>
-            <td>30,000,000+ Lines of C Code</td>
-            <td>&lt; 5,000 Lines of Pure Rust &amp; ASM</td>
+            <td>Full self-test suite</td>
+            <td class="num">161 passed / 0 failed</td>
+            <td>20 further checks report themselves skipped: they need hardware this machine does not have.</td>
           </tr>
           <tr>
-            <td>Memory Allocation</td>
-            <td>Dynamic kmalloc / page cache (OOM risks)</td>
-            <td>100% Deterministic Static Allocation</td>
+            <td>Input probe</td>
+            <td class="num">23 passed / 0 failed</td>
+            <td>Real bytes through the 8042, and click-to-focus proved by a focus holder changing capability.</td>
           </tr>
           <tr>
-            <td>Process Privileges</td>
-            <td>POSIX root user (ambient authority)</td>
-            <td>Fine-Grained Unforgeable Capabilities</td>
+            <td>SMP, 4 cores</td>
+            <td class="num">15 passed / 0 failed</td>
+            <td>Three APs online; the pinned ChaCha20 digest matches on every core.</td>
           </tr>
           <tr>
-            <td>Cold Boot Time</td>
-            <td>800ms - 4.5s</td>
-            <td>&lt; 12ms to ring-3 capability jail</td>
+            <td>Wire and disk</td>
+            <td class="num">independent</td>
+            <td>11 frames validated from the peer's side of the cable; the vault image read back by a host tool.</td>
+          </tr>
+          <tr>
+            <td>Ring-3 containment</td>
+            <td class="num">0 frames leaked</td>
+            <td>A faulting CPL-3 task is retired, its address space torn down, the kernel keeps running.</td>
           </tr>
         </tbody>
       </table>
+      <p class="footnote">
+        The honest edge of that table: the NIC in this QEMU model exposes no MSI capability, so six
+        MSI checks skip and the device keeps its IO-APIC line; the AHCI adapter checks skip entirely
+        until a disk is attached; and a faulted task is retired rather than respawned.
+      </p>
     </section>
 
     <section id="quickstart">
-      <h2 class="section-title">Terminal Quickstart</h2>
-      <p class="section-sub">Build the sovereign kernel binary and run headless QEMU integration tests.</p>
-      <div class="code-terminal">
-        <div class="terminal-bar">
-          <span>bash — cargo build &amp; qemu</span>
-          <button class="copy-btn" onclick="navigator.clipboard.writeText('git clone https://github.com/KELLERBABG/KELLER-OS.git && cd KELLER-OS && cargo build --offline -Zjson-target-spec && qemu-system-x86_64 -cpu max -m 256M -kernel target/x86_64-sovereign_core/debug/sovereign-core -serial stdio -display none')">COPY</button>
-        </div>
-        <pre>git clone https://github.com/KELLERBABG/KELLER-OS.git
+      <div class="section-head">
+        <h2>Quickstart</h2>
+        <p class="section-note">
+          Nightly Rust with <code style="font-family:var(--mono)">rust-src</code>, and QEMU on
+          <code style="font-family:var(--mono)">PATH</code>. The kernel boots as an ELF through QEMU's
+          <code style="font-family:var(--mono)">-kernel</code> loader, which is the path that works
+          here: QEMU's multiboot ROM refuses ELF64 images.
+        </p>
+      </div>
+
+      <ol class="steps">
+        <li>
+          <strong>Build and boot it.</strong>
+          <div class="cmd">
+            <div class="cmd-head">
+              <span>bash</span>
+              <button type="button" data-copy="#cmd-boot" aria-live="polite">Copy</button>
+            </div>
+<pre id="cmd-boot">git clone https://github.com/KELLERBABG/KELLER-OS.git
 cd KELLER-OS
 cargo build --offline -Zjson-target-spec
-qemu-system-x86_64 -cpu max -m 256M -kernel target/x86_64-sovereign_core/debug/sovereign-core -serial stdio -display none</pre>
-      </div>
+qemu-system-x86_64 -cpu max -m 256M \
+  -kernel target/x86_64-sovereign_core/debug/sovereign-core \
+  -serial stdio -display none</pre>
+          </div>
+        </li>
+        <li>
+          <strong>Or let the wrapper do it</strong>, including a windowed run with the emulated VGA adapter,
+          a headless run for captures, and a machine with no display adapter at all:
+          <div class="cmd">
+            <div class="cmd-head">
+              <span>powershell</span>
+              <button type="button" data-copy="#cmd-run" aria-live="polite">Copy</button>
+            </div>
+<pre id="cmd-run">.\run.ps1                # window + COM1 on this terminal
+.\run.ps1 -Headless      # adapter emulated, no window
+.\run.ps1 -NoGraphics    # serial console only</pre>
+          </div>
+        </li>
+        <li>
+          <strong>Watch it prove itself.</strong> Type <code style="font-family:var(--mono)">selftest</code> in the
+          guest shell for the summary line above, <code style="font-family:var(--mono)">gui test</code> for the
+          framebuffer probe, <code style="font-family:var(--mono)">input test</code> for the PS/2 probe, and
+          <code style="font-family:var(--mono)">disk test</code> when a disk is attached.
+          <div class="cmd">
+            <div class="cmd-head">
+              <span>powershell &mdash; the scripted harness from dev-tools/</span>
+              <button type="button" data-copy="#cmd-harness" aria-live="polite">Copy</button>
+            </div>
+<pre id="cmd-harness">python dev-tools\qemu_check.py --vga std --secs 110 `
+    --stdin-script target\full-input.txt --stdin-delay 18 `
+    --expect "SELF-TEST SUMMARY: 161 passed, 0 failed" `
+    --forbid "LOCKDOWN"</pre>
+          </div>
+        </li>
+      </ol>
     </section>
 
-    <footer>
-      <div>&copy; 2026 KELLER SYSTEMS. KellerBabG Ecosystem.</div>
-      <div>KELLER-OS &bull; Bare-Metal Sovereign Kernel &bull; MIT Licensed</div>
-    </footer>
-  </div>
+    <section>
+      <div class="section-head">
+        <h2>Read the design</h2>
+        <p class="section-note">
+          The specifications describe what was built, what was measured, and what is still missing.
+        </p>
+      </div>
+      <ul class="doc-list">
+        <li><a href="SPECIFICATION.md">SPECIFICATION.md</a><span>Master specification: boot order, memory map, IPC, tables.</span></li>
+        <li><a href="GUI_SPECIFICATION.md">GUI_SPECIFICATION.md</a><span>Display server, palette, input routing, backscroll.</span></li>
+        <li><a href="CRYPTOGRAPHY_DEEP_DIVE.md">CRYPTOGRAPHY_DEEP_DIVE.md</a><span>AEAD, sharing, Schnorr identity, the mesh protocol.</span></li>
+        <li><a href="STORAGE_PERSISTENCE.md">STORAGE_PERSISTENCE.md</a><span>AHCI, the vault image format, and the unlock gate.</span></li>
+        <li><a href="NIC_WIRE.md">NIC_WIRE.md</a><span>The driver and the independent peer that watches the wire.</span></li>
+        <li><a href="RING3_ISOLATION.md">RING3_ISOLATION.md</a><span>Address spaces, the syscall door, fault containment.</span></li>
+      </ul>
+    </section>
 
-  <script>
-    const canvas = document.getElementById('bg-canvas');
-    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+  </main>
 
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 0, 30);
+  <footer>
+    <div>&copy; 2026 KELLER SYSTEMS &middot; MIT licensed</div>
+    <div>
+      <a href="https://github.com/KELLERBABG/KELLER-OS">github.com/KELLERBABG/KELLER-OS</a>
+      &middot;
+      <a href="https://kellersystems.dev">kellersystems.dev</a>
+    </div>
+  </footer>
 
-    // 3D Concentric Ring-0 / Ring-3 Privilege Shells
-    const ringsGroup = new THREE.Group();
-    const radii = [6, 10, 14, 18];
-    const colors = [0x6366f1, 0x06b6d4, 0x3b82f6, 0x1e293b];
+</div>
 
-    radii.forEach((r, idx) => {
-      const geo = new THREE.TorusGeometry(r, 0.15, 16, 100);
-      const mat = new THREE.MeshBasicMaterial({ color: colors[idx], transparent: true, opacity: 0.6 });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.rotation.x = Math.PI / 3 + idx * 0.2;
-      mesh.rotation.y = idx * 0.4;
-      ringsGroup.add(mesh);
+<script>
+  // Progressive enhancement only: the commands are readable and selectable without this.
+  document.querySelectorAll('button[data-copy]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var source = document.querySelector(button.dataset.copy);
+      if (!source) { return; }
+      var text = source.textContent.trim();
+      var label = button.textContent;
+      var done = function () {
+        button.textContent = 'Copied';
+        window.setTimeout(function () { button.textContent = label; }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, done);
+      } else {
+        var range = document.createRange();
+        range.selectNodeContents(source);
+        var selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        done();
+      }
     });
-    scene.add(ringsGroup);
-
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-
-    let clock = new THREE.Clock();
-    function animate() {
-      requestAnimationFrame(animate);
-      const t = clock.getElapsedTime();
-      ringsGroup.rotation.y = t * 0.1;
-      ringsGroup.rotation.x = Math.sin(t * 0.05) * 0.2;
-      renderer.render(scene, camera);
-    }
-    animate();
-  </script>
+  });
+</script>
 </body>
 </html>
