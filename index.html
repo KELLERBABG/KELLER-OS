@@ -34,7 +34,7 @@ p{margin:0 0 .9rem;max-width:76ch} b{color:var(--ink);font-weight:500}
  font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--grey)}
 .console .body{padding:.8rem;font-family:'IBM Plex Mono',monospace;font-size:11.5px;line-height:1.75;overflow-x:auto}
 .ln{display:flex;gap:.75rem;white-space:pre}
-.tg{flex:0 0 auto;font-weight:600} .tg.ok{color:var(--ok)} .tg.--{color:var(--skip)} .tg.sh{color:var(--sh)}
+.tg{flex:0 0 auto;font-weight:600} .tg.ok{color:var(--ok)} .tg.skip{color:var(--skip)} .tg.--{color:var(--skip)} .tg.sh{color:var(--sh)}
 .tx{color:#c4d0da}
 table{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.88rem}
 th,td{text-align:left;padding:.55rem .6rem;border-bottom:1px solid var(--edge);vertical-align:top}
@@ -49,7 +49,7 @@ tbody td:first-child{font-family:'IBM Plex Mono',monospace;font-size:.76rem;colo
 html{scrollbar-color:#2a3138 #0b0d10;scrollbar-width:thin}
 ::-webkit-scrollbar{width:12px}::-webkit-scrollbar-track{background:#0b0d10}
 ::-webkit-scrollbar-thumb{background:#2a3138;border:3px solid #0b0d10}::-webkit-scrollbar-thumb:hover{background:#c9834f}
-</style></head><body>
+/* mobile-figure */@media (max-width:900px){.panel,.chart,.die,.pfd,.cfg,.console,.figs,.seqblock,.map{overflow-x:auto;-webkit-overflow-scrolling:touch}.panel svg,.chart svg,.die svg,.pfd svg,.cfg svg,.figs svg,.map svg{min-width:660px;max-width:none}}</style></head><body><!-- noscript-fallback --><noscript><style>html *{opacity:1!important;transform:none!important;filter:none!important;animation:none!important}[data-a],[data-b],.d,.o,.fade,.draw,.chapter,.step,.panel,.hlab{opacity:1!important}</style></noscript>
 <div class="wrap"><header>
   <span class="kick">Bare-metal x86_64 &middot; Rust &middot; no_std</span>
   <h1>KELLER-OS</h1>
@@ -67,7 +67,7 @@ html{scrollbar-color:#2a3138 #0b0d10;scrollbar-width:thin}
   <h2><i>01 &mdash; the evidence</i>COM1, verbatim</h2>
   <p>The harness around this is not the guest marking its own homework: a separate process reads the wire, the disk image and the framebuffer from outside. These are the lines a run on this machine produced.</p>
   <div class="console"><div class="bar"><span>COM1 &middot; serial output</span><span>verbatim &middot; unedited</span></div>
-  <div class="body"><div class="ln"><span class="tg ok">[OK]</span><span class="tx">PIT TIMER LIVE: 21 ticks / ~210 ms (0 lost)</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">APIC SELF-TEST: 16 assertions passed, 0 failed</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">IOAPIC SELF-TEST: 14 assertions passed, 0 failed</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">SMP SELF-TEST: 15 assertions passed, 0 failed, 0 skipped</span></div><div class="ln"><span class="tg --">[--]</span><span class="tx">MSI: 00:03.0 has no MSI capability (capabilities: none) - its interrupt line is the IO-APIC's problem</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">RING-3 ENTRY: 'keller-hello' ran at CPL=3 - the CPU's own frame says cs=0x1b ss=0x23, cr3=0x70b000</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">GUI DISPLAY SERVER: 3072 KiB backbuffer, 8 window slots</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">PS/2 MOUSE WHEEL: IntelliMouse negotiated (id 0x03)</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">SOVEREIGN-CORE BOOT COMPLETE - IDLE LOOP ENTERED</span></div><div class="ln"><span class="tg sh">[SH]</span><span class="tx">SELF-TEST SUMMARY: 161 passed, 0 failed, 20 skipped (checks that need hardware this machine does not have)</span></div></div></div>
+  <div class="body"><div class="ln"><span class="tg ok">[OK]</span><span class="tx">PIT TIMER LIVE: 21 ticks / ~210 ms (0 lost)</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">APIC SELF-TEST: 16 assertions passed, 0 failed</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">IOAPIC SELF-TEST: 14 assertions passed, 0 failed</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">SMP SELF-TEST: 15 assertions passed, 0 failed, 0 skipped</span></div><div class="ln"><span class="tg skip">[--]</span><span class="tx">MSI: 00:03.0 has no MSI capability (capabilities: none) - its interrupt line is the IO-APIC's problem</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">RING-3 ENTRY: 'keller-hello' ran at CPL=3 - the CPU's own frame says cs=0x1b ss=0x23, cr3=0x70b000</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">GUI DISPLAY SERVER: 3072 KiB backbuffer, 8 window slots</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">PS/2 MOUSE WHEEL: IntelliMouse negotiated (id 0x03)</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">SOVEREIGN-CORE BOOT COMPLETE - IDLE LOOP ENTERED</span></div><div class="ln"><span class="tg sh">[SH]</span><span class="tx">SELF-TEST SUMMARY: 161 passed, 0 failed, 20 skipped (checks that need hardware this machine does not have)</span></div></div></div>
   <div class="summary">
     <div><b>161</b><span>checks passed</span></div>
     <div><b>0</b><span>failed</span></div>
