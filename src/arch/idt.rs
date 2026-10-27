@@ -19,7 +19,7 @@
 //!   with a 16-byte-aligned interrupt stack the `call` into Rust is ABI-aligned with no
 //!   extra padding.
 
-use crate::arch::gdt::{IST_INDEX, KERNEL_CODE_SELECTOR};
+use crate::arch::gdt::KERNEL_CODE_SELECTOR;
 use crate::arch::pic;
 use crate::panic::lockdown;
 use crate::println;
@@ -240,12 +240,20 @@ fn stub_for(vector: usize) -> unsafe extern "C" fn() {
     }
 }
 
+fn ist_for_vector(vector: usize) -> u8 {
+    match vector {
+        8 => crate::arch::gdt::IST_DF_INDEX,          // 1: Double Fault on IST1
+        2 | 18 => crate::arch::gdt::IST_NMI_MC_INDEX, // 2: NMI and #MC on IST2
+        _ => 0,                                       // 0: TSS.RSP0 for ring-3 / current RSP for ring-0
+    }
+}
+
 unsafe fn set_gate(vector: usize, handler: unsafe extern "C" fn(), attributes: u8) {
     let address = handler as usize as u64;
     let entry = &mut *core::ptr::addr_of_mut!(IDT[vector]);
     entry.offset_low = (address & 0xFFFF) as u16;
     entry.selector = KERNEL_CODE_SELECTOR;
-    entry.ist = IST_INDEX;
+    entry.ist = ist_for_vector(vector);
     entry.attributes = attributes;
     entry.offset_mid = ((address >> 16) & 0xFFFF) as u16;
     entry.offset_high = ((address >> 32) & 0xFFFF_FFFF) as u32;

@@ -1253,6 +1253,21 @@ pub fn status() {
     );
 }
 
+/// 8042 Keyboard LED control: sets ScrollLock, NumLock and CapsLock LEDs (command 0xED).
+pub fn set_leds(scroll_lock: bool, num_lock: bool, caps_lock: bool) {
+    if !keyboard_present() {
+        return;
+    }
+    let mut mask = 0u8;
+    if scroll_lock { mask |= 1; }
+    if num_lock { mask |= 2; }
+    if caps_lock { mask |= 4; }
+    unsafe {
+        write_data(0xED);
+        let _ = keyboard_command(mask);
+    }
+}
+
 // ---------------------------------------------------------------------------------------
 // Probe
 // ---------------------------------------------------------------------------------------

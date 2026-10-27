@@ -38,8 +38,9 @@ import sys
 MAGIC = b"KOSVLT01"
 VERSION = 1
 SECTOR_SIZE = 512
-SUPERBLOCK_SECTOR = 0
-DATA_START = 1
+SUPERBLOCK_A_SECTOR = 0
+SUPERBLOCK_B_SECTOR = 1
+DATA_START = 2
 MAX_SLOTS = 512
 RECORD_HEADER_BYTES = 8 + 4 + 12  # vault index, payload length, record nonce
 TAG_BYTES = 16
@@ -79,10 +80,13 @@ def parse_superblock(sector):
         "record_size": int.from_bytes(sector[12:14], "little"),
         "flags": int.from_bytes(sector[14:16], "little"),
         "generation": int.from_bytes(sector[16:24], "little"),
+        "bank": sector[24],
         "device_nonce": sector[32:64],
         "owner": sector[64:96],
         "mac": sector[MAC_OFFSET:MAC_OFFSET + 32],
-        "padding": sector[128:],
+        "decoy_owner": sector[128:160],
+        "decoy_mac": sector[160:192],
+        "padding": sector[192:],
     }
 
 
@@ -94,8 +98,11 @@ def read_image(path):
 def records(image, header):
     """Every non-blank data slot, as `(slot, index, length)` plus the raw record bytes."""
     found = []
+    bank = header.get("bank", 0)
+    stride = header["slots"] + 1
+    bank_start = DATA_START if bank == 0 else DATA_START + stride
     for slot in range(header["slots"]):
-        start = (DATA_START + slot) * SECTOR_SIZE
+        start = (bank_start + slot) * SECTOR_SIZE
         block = image[start:start + SECTOR_SIZE]
         if len(block) < SECTOR_SIZE:
             found.append((slot, None, None, block))
@@ -118,9 +125,18 @@ def check_image(report, path, marker, label):
         len(image) // SECTOR_SIZE >= DATA_START + 2,
         f"{label}: the image is too small to hold a superblock and a record",
     )
-    sector = image[SUPERBLOCK_SECTOR * SECTOR_SIZE:(SUPERBLOCK_SECTOR + 1) * SECTOR_SIZE]
-    header = parse_superblock(sector)
-    report.check(header is not None, f"{label}: sector 0 does not carry the format magic")
+    hdr_a = parse_superblock(image[0:SECTOR_SIZE])
+    hdr_b = parse_superblock(image[SECTOR_SIZE:2 * SECTOR_SIZE])
+    if hdr_a and hdr_b:
+        header = hdr_b if hdr_b["generation"] >= hdr_a["generation"] else hdr_a
+    elif hdr_a:
+        header = hdr_a
+    elif hdr_b:
+        header = hdr_b
+    else:
+        header = None
+
+    report.check(header is not None, f"{label}: neither sector 0 nor sector 1 carries valid format magic")
     if header is None:
         return None, None, None
 
@@ -147,11 +163,10 @@ def check_image(report, path, marker, label):
         header["padding"] == bytes(len(header["padding"])),
         f"{label}: the superblock's padding is not zero",
     )
-    # The magic is a format marker, not a pattern that may appear in data: a second copy would be
-    # a superblock from an earlier format left on the device.
+    # With A/B ping-pong, 1 or 2 superblocks may be present.
     report.check(
-        image.count(MAGIC) == 1,
-        f"{label}: the format magic appears {image.count(MAGIC)} times, so a stale superblock survives",
+        image.count(MAGIC) in (1, 2),
+        f"{label}: the format magic appears {image.count(MAGIC)} times (expected 1 or 2)",
     )
 
     found = records(image, header)
@@ -262,7 +277,19 @@ def main():
                         help="plaintext that must not appear on the medium; repeatable")
     parser.add_argument("--from-log", default=None,
                         help="a serial log to take the guest's 'disk superblock' line from")
+    parser.add_argument("--corrupt-bank-b", default=None,
+                        help="corrupt Superblock B in an image file to simulate mid-write power loss")
     args = parser.parse_args()
+
+    if args.corrupt_bank_b:
+        if not os.path.exists(args.corrupt_bank_b):
+            print(f"disk: no such image: {args.corrupt_bank_b}", file=sys.stderr)
+            return 2
+        with open(args.corrupt_bank_b, "r+b") as h:
+            h.seek(SECTOR_SIZE)  # Sector 1: Superblock B
+            h.write(b"CORRUPT_MID_WRITE_POWER_LOSS" + b"\xFF" * 480)
+        print(f"disk: corrupted Superblock B in {args.corrupt_bank_b} (simulated mid-write power loss)")
+        return 0
 
     for path in [args.img, args.later, args.fresh]:
         if path and not os.path.exists(path):

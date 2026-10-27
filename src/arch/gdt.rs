@@ -71,10 +71,12 @@ static mut TSSES: [TaskStateSegment; acpi::MAX_CPUS] = [const { empty_tss() }; a
 #[repr(C, align(16))]
 struct InterruptStack([u8; IST_STACK_SIZE]);
 
-/// One interrupt stack per processor. Every gate in this kernel switches to IST1, and the CPU
-/// reads IST1 out of the TSS that the *current* task register names - so sharing one TSS means
-/// sharing one stack, and two processors inside an IST gate at the same time would share it.
-static mut IST_STACKS: [InterruptStack; acpi::MAX_CPUS] =
+/// IST1 is reserved exclusively for #DF (Double Fault).
+static mut DF_STACKS: [InterruptStack; acpi::MAX_CPUS] =
+    [const { InterruptStack([0; IST_STACK_SIZE]) }; acpi::MAX_CPUS];
+
+/// IST2 is reserved exclusively for NMI and #MC (Machine Check).
+static mut NMI_STACKS: [InterruptStack; acpi::MAX_CPUS] =
     [const { InterruptStack([0; IST_STACK_SIZE]) }; acpi::MAX_CPUS];
 
 /// The selector a given processor has to load its own task state segment with.
@@ -82,14 +84,23 @@ pub fn tss_selector(cpu: usize) -> u16 {
     ((TSS_FIRST_INDEX + 2 * cpu) << 3) as u16
 }
 
-/// Points `cpu`'s task state segment at `cpu`'s own interrupt stack. Done from the processor
-/// that owns it, before its task register is loaded.
+/// Points `cpu`'s task state segment at `cpu`'s own interrupt stacks.
 unsafe fn prepare_stack(cpu: usize) {
-    let top = core::ptr::addr_of!(IST_STACKS[cpu]) as u64 + IST_STACK_SIZE as u64;
+    let df_top = core::ptr::addr_of!(DF_STACKS[cpu]) as u64 + IST_STACK_SIZE as u64;
+    let nmi_top = core::ptr::addr_of!(NMI_STACKS[cpu]) as u64 + IST_STACK_SIZE as u64;
     let tss = &mut *core::ptr::addr_of_mut!(TSSES[cpu]);
-    tss.ist[0] = top;
-    // Ring 3 entries will switch to this stack once user tasks exist.
-    tss.rsp0 = top;
+    tss.ist[0] = df_top;  // IST1: #DF
+    tss.ist[1] = nmi_top; // IST2: NMI / #MC
+    tss.rsp0 = df_top;   // Fallback ring-0 stack until per-process stack is set
+}
+
+/// Sets the TSS.RSP0 ring-0 stack top for context switching.
+pub fn set_rsp0(cpu: usize, rsp0: u64) {
+    if cpu < acpi::MAX_CPUS {
+        unsafe {
+            (*core::ptr::addr_of_mut!(TSSES[cpu])).rsp0 = rsp0;
+        }
+    }
 }
 
 /// Writes one processor's 16-byte task state segment descriptor across its two 8-byte slots.
@@ -151,11 +162,13 @@ pub unsafe fn init() {
     reload_data_segments();
     load_task_register(0);
 
-    // The interrupt stacks must be scrubbed on panic like any other secret holder. One region
-    // covers all of them: they are one array, which is also why the region count does not grow
-    // with the number of processors.
+    // The interrupt stacks must be scrubbed on panic like any other secret holder.
     panic::register_scrub_region(
-        core::ptr::addr_of!(IST_STACKS) as u64,
+        core::ptr::addr_of!(DF_STACKS) as u64,
+        size_of::<[InterruptStack; acpi::MAX_CPUS]>() as u64,
+    );
+    panic::register_scrub_region(
+        core::ptr::addr_of!(NMI_STACKS) as u64,
         size_of::<[InterruptStack; acpi::MAX_CPUS]>() as u64,
     );
 }
@@ -190,7 +203,11 @@ pub const USER_CODE_SELECTOR: u16 = 0x1B;
 /// Ring-3 data selector: GDT index 4 with RPL 3 (0x20 | 3); also what `ss` must be on a
 /// ring-3 frame.
 pub const USER_DATA_SELECTOR: u16 = 0x23;
-/// IST index (1-based in the IDT `ist` field) used by every gate.
+/// IST index for #DF (Double Fault): exclusively IST1.
+pub const IST_DF_INDEX: u8 = 1;
+/// IST index for NMI and #MC (Machine Check): exclusively IST2.
+pub const IST_NMI_MC_INDEX: u8 = 2;
+/// Legacy IST index alias.
 pub const IST_INDEX: u8 = 1;
 
 /// Descriptor privilege level of one GDT entry, or 0xFF when the selector is outside the

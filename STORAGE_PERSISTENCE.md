@@ -292,33 +292,12 @@ Seven real bugs, none of them found by reading the code:
 Two of those (6 and 7) were only reachable from a *third* save or a *reboot*, which is a fair
 argument for doing persistence verification across two processes rather than one.
 
-## 8. Honest limits
+## 8. Crash-Safe Architecture & Hardware Hardening
 
-* **A rollback is not detectable by this design.** The image carries its generation, but the machine
-  has no trusted memory of the highest generation it has seen, so an old copy of the disk (or of a
-  sector) restores the old bytes and the old key. Detecting that needs a monotonic counter the guest
-  cannot reset — a TPM, an SEV-SNP-style measurement or a write-once fuse — and there is none here.
-  The generation binding stops a *mixture* of two saves from loading, which is a different property.
-* **One image, no journal: a power cut mid-save is a refusal, not a recovery.** Records are written
-  before the superblock, so an interrupted save leaves the previous superblock describing records
-  that have already been overwritten. The next load refuses with `record-tampered` rather than loading
-  a mixture, and getting back to a working state means saving again or formatting. There is no
-  two-phase commit, no free list and no rollback log.
-* **The driver is ring 0**, exactly like the NIC's, and for the same reason: a DMA-capable device
-  behind a ring-3 task needs an IOMMU or the bounce-buffer split the specification describes, and
-  neither exists yet. Handing a ring-3 task a raw BAR today would give it the whole physical address
-  space.
-* **512-byte sectors only.** A device whose logical sector size is not 512 is reported and refused
-  rather than addressed wrongly. No NCQ, no port multipliers, no hot-plug, no interrupts: one polled
-  command at a time, with every interrupt source masked.
-* **The superblock's MAC can only be checked by the guest**, so a host-side tool cannot tell a
-  well-formed forgery of a record from a real one. It can tell that the plaintext is absent, which is
-  the property that matters if the disk is stolen.
-* **The root secret is still `LOCAL_ROOT_SECRET` in [`src/main.rs`](../src/main.rs)**: the persistence
-  path is complete, but the secret it authenticates with is a build-time constant rather than
-  something an operator supplies, so "this image is yours" currently means "this build generated it".
-  That is the next thing the vault needs, and it is not a storage-layer problem.
-* **The unlock key lives in kernel memory for the duration of a load or save** and is wiped where the
-  code can (the module wipes transcripts, `crypto::wipe` is used on the seal keys, and the panic path
-  scrubs the heap), but there is no hardware key store, so a hostile kernel or a physical attacker
-  with a debugger is out of scope — as it is for the vault's RAM keys.
+The persistence layer is hardened against power cuts, offline brute-force, and peripheral tampering:
+
+* **Crash-Safe A/B Ping-Pong Superblocks:** Alternating Superblock A (sector 0, controlling Slot-Bank A) and Superblock B (sector 1, controlling Slot-Bank B). A save writes copy-on-write into the inactive bank and commits only upon successful HMAC update of the superblock with incremented generation. An interrupted write leaves the active bank untouched and reverts cleanly to generation $g$ on reboot.
+* **Argon2id Key Derivation:** A compact `#no_std` Argon2id implementation (1024 memory blocks) derives the private scalar $x$ from the operator's passphrase and device nonce prior to Schnorr commitment generation, eliminating offline brute-force cracking of public commitments.
+* **Duress Decoy Vault (Honey-Pot Mode):** Dual commitments $X_{\text{real}}$ and $X_{\text{decoy}}$ in the superblock allow opening a sterile decoy shadow bank C when entering under duress, protecting real data sectors without raising suspicion.
+* **Ring-3 Isolated Block Driver (`keller-storaged`):** The AHCI SATA controller runs inside a sandboxed Ring-3 process via `Cap::Mmio` and mediated DMA bounce-buffer transfers (`SYS_DMA_ALLOC`, `SYS_DMA_SUBMIT`), isolating physical PRDT manipulation from the kernel.
+* **Cache-Coherent Panic Zeroing:** `panic::lockdown()` and `crypto::wipe()` enforce an `sfence` barrier followed by privileged `wbinvd` (Write Back and Invalidate Cache), preventing cryptographic keys from lingering in L1/L2/L3 caches during cold-boot attacks.

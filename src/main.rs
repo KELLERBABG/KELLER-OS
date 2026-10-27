@@ -227,6 +227,7 @@ pub extern "C" fn kernel_main(magic: u32, boot_info: u32) -> ! {
         // Bochs/QEMU VBE second (see GUI_SPECIFICATION.md §3). Everything below still runs on
         // a machine with no display adapter at all — the console is COM1.
         pci::describe();
+        pci::init_watchdog();
         println!(
             "[OK] PCI SELF-TEST: {}",
             if pci::self_test() {
@@ -558,6 +559,14 @@ pub extern "C" fn kernel_main(magic: u32, boot_info: u32) -> ! {
         // runs before the shell comes up because it is the one claim everything else in the
         // microkernel story rests on, and it costs about one timer tick.
         proc::boot_probe();
+        let proc_report = proc::self_test();
+        println!(
+            "[OK] RING-3 CAPABILITY SUBSTRATE: {} assertions passed, {} failed",
+            proc_report.passed, proc_report.failed
+        );
+        for failure in proc_report.failures.iter() {
+            println!("[!!] RING-3 KAT FAILED: {}", failure);
+        }
 
         // [8] Prove the shell path works without an operator at the console.
         shell::execute(b"status");

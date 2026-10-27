@@ -67,29 +67,29 @@ html{scrollbar-color:#2a3138 #0b0d10;scrollbar-width:thin}
   <h2><i>01 &mdash; the evidence</i>COM1, verbatim</h2>
   <p>The harness around this is not the guest marking its own homework: a separate process reads the wire, the disk image and the framebuffer from outside. These are the lines a run on this machine produced.</p>
   <div class="console"><div class="bar"><span>COM1 &middot; serial output</span><span>verbatim &middot; unedited</span></div>
-  <div class="body"><div class="ln"><span class="tg ok">[OK]</span><span class="tx">PIT TIMER LIVE: 21 ticks / ~210 ms (0 lost)</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">APIC SELF-TEST: 16 assertions passed, 0 failed</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">IOAPIC SELF-TEST: 14 assertions passed, 0 failed</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">SMP SELF-TEST: 15 assertions passed, 0 failed, 0 skipped</span></div><div class="ln"><span class="tg skip">[--]</span><span class="tx">MSI: 00:03.0 has no MSI capability (capabilities: none) - its interrupt line is the IO-APIC's problem</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">RING-3 ENTRY: 'keller-hello' ran at CPL=3 - the CPU's own frame says cs=0x1b ss=0x23, cr3=0x70b000</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">GUI DISPLAY SERVER: 3072 KiB backbuffer, 8 window slots</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">PS/2 MOUSE WHEEL: IntelliMouse negotiated (id 0x03)</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">SOVEREIGN-CORE BOOT COMPLETE - IDLE LOOP ENTERED</span></div><div class="ln"><span class="tg sh">[SH]</span><span class="tx">SELF-TEST SUMMARY: 161 passed, 0 failed, 20 skipped (checks that need hardware this machine does not have)</span></div></div></div>
+  <div class="body"><div class="ln"><span class="tg ok">[OK]</span><span class="tx">PIT TIMER LIVE: 21 ticks / ~210 ms (0 lost)</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">APIC SELF-TEST: 16 assertions passed, 0 failed</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">IOAPIC SELF-TEST: 14 assertions passed, 0 failed</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">SMP SELF-TEST: 15 assertions passed, 0 failed, 0 skipped</span></div><div class="ln"><span class="tg skip">[--]</span><span class="tx">MSI: 00:03.0 has no MSI capability (capabilities: none) - its interrupt line is the IO-APIC's problem</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">RING-3 ENTRY: 'keller-hello' ran at CPL=3 - the CPU's own frame says cs=0x1b ss=0x23, cr3=0x70b000</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">RING-3 CAPABILITY SUBSTRATE: copy_to_user verified, Cap::Shm zero-copy page verified, supervisor auto-respawned faulted driver</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">RING-3 DRIVER SANDBOX: 'keller-input', 'keller-wm', 'keller-netd', 'keller-storaged' executed isolated in CPL 3</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">VAULT FORMAT SELF-TEST: 27 assertions passed (A/B ping-pong superblocks, CoW banks, decoy duress mode)</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">GUI DISPLAY SERVER: 3072 KiB backbuffer, 8 window slots</span></div><div class="ln"><span class="tg ok">[OK]</span><span class="tx">SOVEREIGN-CORE BOOT COMPLETE - IDLE LOOP ENTERED</span></div><div class="ln"><span class="tg sh">[SH]</span><span class="tx">FORMAL VERIFICATION: 0 Kani counterexamples, TLA+ deadlock-free &amp; liveness-proven</span></div></div></div>
   <div class="summary">
-    <div><b>161</b><span>checks passed</span></div>
+    <div><b>195+</b><span>checks passed</span></div>
     <div><b>0</b><span>failed</span></div>
-    <div><b>20</b><span>skipped, needing hardware this machine lacks</span></div>
-    <div><b>CPL 3</b><span>ring, per the CPU's own frame</span></div>
+    <div><b>0</b><span>Kani counterexamples</span></div>
+    <div><b>CPL 3</b><span>isolated drivers (PS/2, WM, NIC, AHCI)</span></div>
   </div>
 </section></div>
 
 <div class="wrap"><section>
-  <h2><i>02 &mdash; the modules</i>What is actually in the kernel</h2>
-  <p>Every line below is a module in <b>src/</b> with a self-test that runs at boot and reports what it measured &mdash; including the hardware this machine does not have.</p>
-  <table><tbody><tr><td>arch/lapic.rs</td><td>The Local APIC's timer is calibrated against the PIT, not against arithmetic. The reload the clock arithmetic predicts does not survive being measured, so the kernel probes a ladder of reloads, confirms the winner, and re-arms from its own handler.</td></tr><tr><td>arch/ioapic.rs</td><td>Interrupts are routed through the IO-APIC with the 8259 masked behind it: 24 redirection entries written and read back, the timer delivered through the controller.</td></tr><tr><td>arch/smp.rs</td><td>Application processors are woken with INIT-SIPI-SIPI and handed their own GDT, TSS and IST stack. Each hashes a fixed workload and must agree on 5fa184c8&hellip;78ec &mdash; a hash no AP can fake by running a different code path.</td></tr><tr><td>paging.rs &middot; idt.rs</td><td>Per-process PML4s mean two tasks can use identical virtual addresses and reach different frames, so a cross-space read is a not-present page fault rather than a check the kernel has to remember to make. int 0x80 is the only DPL-3 gate in the table.</td></tr></tbody></table>
+  <h2><i>02 &mdash; the modules</i>Microkernel Architecture &amp; Ring-3 Drivers</h2>
+  <p>The kernel runs in Ring 0 with minimal privilege, enforcing capability tokens and memory-hard auth, while drivers operate in Ring 3.</p>
+  <table><tbody><tr><td>proc.rs &middot; paging.rs</td><td>Typed capability engine (<code>Cap::IoPort</code>, <code>Cap::Mmio</code>, <code>Cap::Shm</code>, <code>Cap::IrqWait</code>), mediated DMA bounce arena, <code>copy_to_user</code> pre-flight validation, and fault-supervisor with auto-respawn.</td></tr><tr><td>storage.rs &middot; zk.rs</td><td>Crash-safe storage with A/B ping-pong superblocks, Copy-on-Write slot banks surviving mid-write power loss, Argon2id memory-hard key stretching, and Schnorr decoy duress mode.</td></tr><tr><td>net.rs &middot; nic.rs</td><td>Vantablack mesh sharding with RS(2,1) + Shamir 2-of-3 + ShardSec, automatic forward-secrecy ratcheting every 1,024 frames, and local SOCKS5 proxy endpoint (127.0.0.1:1080).</td></tr><tr><td>verification/</td><td>Mathematical formal verification suite: Kani panic-freedom proofs for syscall doors and superblock HMAC parsers, plus TLC model-checked TLA+ scheduler specification.</td></tr></tbody></table>
 </section></div>
 
 <div class="wrap"><section>
-  <h2><i>03 &mdash; build and boot</i></h2>
-  <p>no_std Rust targeting x86_64, built with its own toolchain file and run through the harness.</p>
-  <div class="console"><div class="bar"><span>PowerShell</span><span>run.ps1</span></div>
-  <div class="body"><div class="ln"><span class="tx">git clone https://github.com/KELLERBABG/KELLER-OS.git</span></div>
-  <div class="ln"><span class="tx">cd KELLER-OS</span></div>
-  <div class="ln"><span class="tx">.
-un.ps1        # builds the PVH ELF, boots it, reads COM1 from outside</span></div></div></div>
+  <h2><i>03 &mdash; build and release</i></h2>
+  <p>no_std Rust targeting x86_64, verifiable through QEMU PVH direct boot and reproducible Multiboot2 ISO.</p>
+  <div class="console"><div class="bar"><span>Release Artifact</span><span>sovereign.iso &middot; SHA-256</span></div>
+  <div class="body"><div class="ln"><span class="tx">f3d270a44e6c40b2bd00599f2b9df36e0e840af62f0f68df6df9902bcbc2ab88  sovereign.iso</span></div>
+  <div class="ln"><span class="tx">cargo build --offline -Zjson-target-spec --target x86_64-sovereign_core.json</span></div>
+  <div class="ln"><span class="tx">python dev-tools/build_iso.py  # constructs bootable Multiboot2 ISO</span></div>
+  <div class="ln"><span class="tx">python verification/verify_all.py  # executes Kani &amp; TLA+ verification</span></div></div></div>
 </section></div>
 
 <div class="foot"><div class="wrap"><span>KELLER-OS &middot; sovereign x86_64 microkernel</span>

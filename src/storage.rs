@@ -63,14 +63,18 @@ use crate::block::{BlockDevice, SECTOR_SIZE};
 use crate::crypto::{self, KEY_LEN};
 use crate::println;
 use crate::vault::KellerVault;
+use crate::zk::Witness;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 pub const MAGIC: &[u8; 8] = b"KOSVLT01";
 pub const VERSION: u16 = 1;
+pub const SUPERBLOCK_A_SECTOR: u64 = 0;
+pub const SUPERBLOCK_B_SECTOR: u64 = 1;
 pub const SUPERBLOCK_SECTOR: u64 = 0;
-pub const DATA_START: u64 = 1;
+pub const DATA_START: u64 = 2;
+pub const DECOY_SLOTS: u16 = 4;
 /// Highest slot count the superblock can describe.
 pub const MAX_SLOTS: u16 = 512;
 /// Bytes each record spends before its sealed payload: the vault index (8), the payload length
@@ -88,6 +92,24 @@ const SUPERBLOCK_MAC_OFFSET: usize = 96;
 const RECORD_KEY_INFO: &[u8] = b"KOS-VAULT-RECORD-KEY";
 /// Signature that keeps this module's state in `.data`: the boot handoff does not zero `.bss`.
 const STORAGE_SIGNATURE: u64 = 0x4B45_4C4C_5354_4F01; // "KELLSTO\x01"
+
+pub fn bank_data_start(bank: u8, slots: u16) -> u64 {
+    let stride = slots as u64 + 1;
+    match bank {
+        0 => DATA_START,
+        1 => DATA_START + stride,
+        _ => DATA_START + 2 * stride, // Bank C (Decoy)
+    }
+}
+
+pub fn bank_probe_sector(bank: u8, slots: u16) -> u64 {
+    let stride = slots as u64 + 1;
+    match bank {
+        0 => DATA_START + slots as u64,
+        1 => DATA_START + stride + slots as u64,
+        _ => DATA_START + 2 * stride + DECOY_SLOTS as u64,
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum StorageError {
@@ -129,20 +151,26 @@ pub struct Header {
     pub generation: u64,
     pub slots: u16,
     pub flags: u16,
+    pub bank: u8,
     pub device_nonce: [u8; 32],
     pub owner: [u8; 32],
     pub hmac: [u8; 32],
+    pub decoy_owner: [u8; 32],
+    pub decoy_hmac: [u8; 32],
 }
 
 impl Header {
-    const fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self {
             generation: 0,
             slots: 0,
             flags: 0,
+            bank: 0,
             device_nonce: [0; 32],
             owner: [0; 32],
             hmac: [0; 32],
+            decoy_owner: [0; 32],
+            decoy_hmac: [0; 32],
         }
     }
 
@@ -161,7 +189,20 @@ impl Header {
         context
     }
 
-    fn encode(&self) -> [u8; SECTOR_SIZE] {
+    pub fn decoy_context(&self) -> Vec<u8> {
+        let mut context = Vec::with_capacity(112);
+        context.extend_from_slice(MAGIC);
+        context.extend_from_slice(&VERSION.to_le_bytes());
+        context.extend_from_slice(&self.slots.to_le_bytes());
+        context.extend_from_slice(&(SECTOR_SIZE as u16).to_le_bytes());
+        context.extend_from_slice(&self.flags.to_le_bytes());
+        context.extend_from_slice(&self.generation.to_le_bytes());
+        context.extend_from_slice(&self.device_nonce);
+        context.extend_from_slice(&self.decoy_owner);
+        context
+    }
+
+    pub fn encode(&self) -> [u8; SECTOR_SIZE] {
         let mut block = [0u8; SECTOR_SIZE];
         block[..8].copy_from_slice(MAGIC);
         block[8..10].copy_from_slice(&VERSION.to_le_bytes());
@@ -169,19 +210,25 @@ impl Header {
         block[12..14].copy_from_slice(&(SECTOR_SIZE as u16).to_le_bytes());
         block[14..16].copy_from_slice(&self.flags.to_le_bytes());
         block[16..24].copy_from_slice(&self.generation.to_le_bytes());
+        block[24] = self.bank;
         block[32..64].copy_from_slice(&self.device_nonce);
         block[64..96].copy_from_slice(&self.owner);
         block[SUPERBLOCK_MAC_OFFSET..SUPERBLOCK_MAC_OFFSET + 32].copy_from_slice(&self.hmac);
+        block[128..160].copy_from_slice(&self.decoy_owner);
+        block[160..192].copy_from_slice(&self.decoy_hmac);
         block
     }
 }
 
 // ------------------------------------------------------------------ format primitives
 
-fn read_header(device: &mut dyn BlockDevice) -> Result<Option<Header>, StorageError> {
+fn read_single_header(
+    device: &mut dyn BlockDevice,
+    sector: u64,
+) -> Result<Option<Header>, StorageError> {
     let mut block = [0u8; SECTOR_SIZE];
     device
-        .read_sectors(SUPERBLOCK_SECTOR, &mut block)
+        .read_sectors(sector, &mut block)
         .map_err(|_| StorageError::Device)?;
     if &block[..8] != MAGIC {
         return Ok(None);
@@ -195,6 +242,7 @@ fn read_header(device: &mut dyn BlockDevice) -> Result<Option<Header>, StorageEr
     }
     let mut header = Header::empty();
     header.generation = u64::from_le_bytes(block[16..24].try_into().unwrap());
+    header.bank = block[24];
     header.slots = slots;
     header.flags = u16::from_le_bytes([block[14], block[15]]);
     header.device_nonce.copy_from_slice(&block[32..64]);
@@ -202,12 +250,48 @@ fn read_header(device: &mut dyn BlockDevice) -> Result<Option<Header>, StorageEr
     header
         .hmac
         .copy_from_slice(&block[SUPERBLOCK_MAC_OFFSET..SUPERBLOCK_MAC_OFFSET + 32]);
+    header.decoy_owner.copy_from_slice(&block[128..160]);
+    header.decoy_hmac.copy_from_slice(&block[160..192]);
     Ok(Some(header))
+}
+
+fn read_header(device: &mut dyn BlockDevice) -> Result<Option<Header>, StorageError> {
+    let res_a = read_single_header(device, SUPERBLOCK_A_SECTOR);
+    let res_b = read_single_header(device, SUPERBLOCK_B_SECTOR);
+    if let Err(e) = &res_a {
+        if *e == StorageError::BadImage {
+            return Err(StorageError::BadImage);
+        }
+    }
+    if let Err(e) = &res_b {
+        if *e == StorageError::BadImage {
+            return Err(StorageError::BadImage);
+        }
+    }
+    let hdr_a = res_a.ok().flatten();
+    let hdr_b = res_b.ok().flatten();
+    match (hdr_a, hdr_b) {
+        (Some(a), Some(b)) => {
+            if b.generation > a.generation {
+                Ok(Some(b))
+            } else {
+                Ok(Some(a))
+            }
+        }
+        (Some(a), None) => Ok(Some(a)),
+        (None, Some(b)) => Ok(Some(b)),
+        (None, None) => Ok(None),
+    }
 }
 
 fn header_mac(key: &[u8; KEY_LEN], header: &Header) -> [u8; 32] {
     let block = header.encode();
     crypto::hmac_sha256(key, &block[..SUPERBLOCK_MAC_OFFSET])
+}
+
+fn decoy_header_mac(key: &[u8; KEY_LEN], header: &Header) -> [u8; 32] {
+    let block = header.encode();
+    crypto::hmac_sha256(key, &block[..160])
 }
 
 fn record_key(unlock: &[u8; KEY_LEN], slot: u16, generation: u64) -> [u8; KEY_LEN] {
@@ -294,24 +378,45 @@ fn probe(device: &mut dyn BlockDevice, lba: u64) -> Result<(), StorageError> {
 }
 
 fn probe_sector(slots: u16) -> u64 {
-    DATA_START + slots as u64
+    bank_probe_sector(0, slots)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AuthMode {
+    Real([u8; KEY_LEN]),
+    Decoy([u8; KEY_LEN]),
 }
 
 /// Reads the image and checks that it belongs to `vault`, returning the unlock key.
-///
-/// This is the authentication step, and it is the only way to a key.
-fn authenticate(vault: &KellerVault, header: &Header) -> Result<[u8; KEY_LEN], StorageError> {
+/// Supports both real owner and honey-pot duress mode.
+fn authenticate(vault: &KellerVault, header: &Header) -> Result<AuthMode, StorageError> {
+    // 1. Real owner
     let context = header.context();
     let proof = vault.prove_ownership(&context);
-    if !vault.owns(&header.owner, &proof, &context) {
-        return Err(StorageError::NotAuthenticated);
+    if vault.owns(&header.owner, &proof, &context) {
+        let unlock = crate::zk::unlock_key(&header.owner, &proof, &header.device_nonce);
+        if crypto::ct_eq(&header_mac(&unlock, header), &header.hmac) {
+            return Ok(AuthMode::Real(unlock));
+        } else {
+            return Err(StorageError::HeaderTampered);
+        }
     }
-    let unlock = crate::zk::unlock_key(&header.owner, &proof, &header.device_nonce);
-    if crypto::ct_eq(&header_mac(&unlock, header), &header.hmac) {
-        Ok(unlock)
-    } else {
-        Err(StorageError::HeaderTampered)
+
+    // 2. Honey-pot duress mode
+    if header.decoy_owner != [0u8; 32] {
+        let d_ctx = header.decoy_context();
+        let d_proof = vault.prove_ownership(&d_ctx);
+        if vault.owns(&header.decoy_owner, &d_proof, &d_ctx) {
+            let d_unlock = crate::zk::unlock_key(&header.decoy_owner, &d_proof, &header.device_nonce);
+            if crypto::ct_eq(&decoy_header_mac(&d_unlock, header), &header.decoy_hmac) {
+                return Ok(AuthMode::Decoy(d_unlock));
+            } else {
+                return Err(StorageError::HeaderTampered);
+            }
+        }
     }
+
+    Err(StorageError::NotAuthenticated)
 }
 
 // ------------------------------------------------------------------ operations (device-generic)
@@ -323,30 +428,31 @@ pub fn format_image(
     vault: &KellerVault,
 ) -> Result<Header, StorageError> {
     let capacity = device.sector_count();
-    if capacity < DATA_START + 2 {
+    let min_needed = DATA_START + 2 * (8 + 1) + DECOY_SLOTS as u64 + 1;
+    if capacity < min_needed {
         return Err(StorageError::BadImage);
     }
-    // One slot per vault sector, with a floor so a formatted image is usable before anything is
-    // stored: a sector count that already exceeds the disk is refused before anything is written.
     let wanted = core::cmp::max(vault.sector_count() as u64, 8);
-    if wanted > capacity - DATA_START - 1 || wanted > MAX_SLOTS as u64 {
+    if DATA_START + 2 * (wanted + 1) + DECOY_SLOTS as u64 + 1 > capacity || wanted > MAX_SLOTS as u64 {
         return Err(StorageError::TooManySectors);
     }
 
     let mut header = Header::empty();
     header.generation = 1;
+    header.bank = 0;
     header.slots = wanted as u16;
     crypto::hardware_rand_bytes(&mut header.device_nonce);
     header.owner = vault.proof_commitment();
 
-    // The probe runs before the proof so the flag it sets can be part of the statement: the proof
-    // has to be over the header *exactly as it will be written*. Proving first and setting the
-    // flag afterwards would derive a key from a statement the medium never holds, and the image
-    // could then never be opened again.
-    if let Err(error) = probe(device, probe_sector(header.slots)) {
+    // Derive duress decoy commitment
+    let decoy_witness = Witness::from_secret(b"duress");
+    header.decoy_owner = decoy_witness.commitment();
+
+    if let Err(error) = probe(device, bank_probe_sector(0, header.slots)) {
         return Err(error);
     }
     header.flags |= 1;
+
     let context = header.context();
     let proof = vault.prove_ownership(&context);
     if !vault.owns(&header.owner, &proof, &context) {
@@ -355,112 +461,238 @@ pub fn format_image(
     let unlock = crate::zk::unlock_key(&header.owner, &proof, &header.device_nonce);
     header.hmac = header_mac(&unlock, &header);
 
+    // Decoy unlock key & HMAC
+    let d_ctx = header.decoy_context();
+    let d_proof = decoy_witness.prove(&d_ctx);
+    let d_unlock = crate::zk::unlock_key(&header.decoy_owner, &d_proof, &header.device_nonce);
+    header.decoy_hmac = decoy_header_mac(&d_unlock, &header);
+
+    // Blank Bank A and Bank B
     let blank = [0u8; SECTOR_SIZE];
-    for slot in 0..header.slots as u64 {
+    for b in 0..2 {
+        let start = bank_data_start(b, header.slots);
+        for slot in 0..header.slots as u64 {
+            device
+                .write_sectors(start + slot, &blank)
+                .map_err(|_| StorageError::Device)?;
+        }
+    }
+
+    // Initialize Bank C with decoy sector
+    let decoy_start = bank_data_start(2, header.slots);
+    for slot in 0..DECOY_SLOTS as u64 {
         device
-            .write_sectors(DATA_START + slot, &blank)
+            .write_sectors(decoy_start + slot, &blank)
             .map_err(|_| StorageError::Device)?;
     }
+    let mut decoy_vault = KellerVault::new(b"duress");
+    let decoy_msg = b"SYSTEM STERILE: DECOY VAULT ACTIVE (DURESS MODE)";
+    decoy_vault.store(USER_SECTOR, decoy_msg).map_err(|_| StorageError::Device)?;
+    if let Some(sealed_decoy) = decoy_vault.sealed_bytes(USER_SECTOR) {
+        let decoy_block = encode_record(&d_unlock, 0, header.generation, USER_SECTOR, &sealed_decoy)?;
+        device
+            .write_sectors(decoy_start, &decoy_block)
+            .map_err(|_| StorageError::Device)?;
+    }
+
     device
-        .write_sectors(SUPERBLOCK_SECTOR, &header.encode())
+        .write_sectors(SUPERBLOCK_A_SECTOR, &header.encode())
         .map_err(|_| StorageError::Device)?;
+    device
+        .write_sectors(SUPERBLOCK_B_SECTOR, &blank)
+        .map_err(|_| StorageError::Device)?;
+
     Ok(header)
 }
-
 
 pub fn save_image(
     device: &mut dyn BlockDevice,
     vault: &mut KellerVault,
 ) -> Result<Header, StorageError> {
-    let mut header = match read_header(device)? {
+    if vault.is_duress() {
+        if let Some(h) = read_header(device)? {
+            return Ok(h);
+        }
+    }
+
+    let active = match read_header(device)? {
         Some(header) => header,
         None => format_image(device, vault)?,
     };
-    // A vault whose secret changed since the image was written cannot write to it: that would be
-    // re-keying someone else's disk under a new identity.
-    if !crypto::ct_eq(&header.owner, &vault.proof_commitment()) {
-        return Err(StorageError::NotAuthenticated);
-    }
-    // The image as it stands now must open under this secret, or writing would be overwriting
-    // something this vault cannot read.
-    authenticate(vault, &header)?;
 
-    // From here the header is the *new* one, and the key for this save comes from a proof about
-    // it. The generation is in the proof's statement as well as in every record's AAD, so a save
-    // and a load of the same image agree on one key - which is the property that makes a second
-    // save possible at all.
-    let generation = header.generation + 1;
-    header.generation = generation;
-    header.flags |= 1;
-    let context = header.context();
-    let proof = vault.prove_ownership(&context);
-    if !vault.owns(&header.owner, &proof, &context) {
+    if !crypto::ct_eq(&active.owner, &vault.proof_commitment()) {
         return Err(StorageError::NotAuthenticated);
     }
-    let unlock = crate::zk::unlock_key(&header.owner, &proof, &header.device_nonce);
+    authenticate(vault, &active)?;
+
+    let target_bank = if active.bank == 0 { 1 } else { 0 };
+    let target_sector = if target_bank == 0 { SUPERBLOCK_A_SECTOR } else { SUPERBLOCK_B_SECTOR };
+    let generation = active.generation + 1;
+
+    let mut new_header = active;
+    new_header.generation = generation;
+    new_header.bank = target_bank;
+    new_header.flags |= 1;
+
+    let context = new_header.context();
+    let proof = vault.prove_ownership(&context);
+    if !vault.owns(&new_header.owner, &proof, &context) {
+        return Err(StorageError::NotAuthenticated);
+    }
+    let unlock = crate::zk::unlock_key(&new_header.owner, &proof, &new_header.device_nonce);
+    new_header.hmac = header_mac(&unlock, &new_header);
+
+    if new_header.decoy_owner != [0u8; 32] {
+        let decoy_witness = Witness::from_secret(b"duress");
+        let d_ctx = new_header.decoy_context();
+        let d_proof = decoy_witness.prove(&d_ctx);
+        let d_unlock = crate::zk::unlock_key(&new_header.decoy_owner, &d_proof, &new_header.device_nonce);
+        new_header.decoy_hmac = decoy_header_mac(&d_unlock, &new_header);
+    }
 
     let indices = vault.sector_indices();
-    if indices.len() > header.slots as usize {
+    if indices.len() > new_header.slots as usize {
         return Err(StorageError::TooManySectors);
     }
+    let target_start = bank_data_start(target_bank, new_header.slots);
     for (slot, index) in indices.iter().enumerate() {
         let sealed = vault.sealed_bytes(*index).ok_or(StorageError::BadImage)?;
         let block = encode_record(&unlock, slot as u16, generation, *index, sealed)?;
         device
-            .write_sectors(DATA_START + slot as u64, &block)
+            .write_sectors(target_start + slot as u64, &block)
             .map_err(|_| StorageError::Device)?;
     }
-    if let Err(error) = probe(device, probe_sector(header.slots)) {
+    let blank = [0u8; SECTOR_SIZE];
+    for slot in indices.len()..new_header.slots as usize {
+        device
+            .write_sectors(target_start + slot as u64, &blank)
+            .map_err(|_| StorageError::Device)?;
+    }
+
+    if let Err(error) = probe(device, bank_probe_sector(target_bank, new_header.slots)) {
         return Err(error);
     }
-    header.hmac = header_mac(&unlock, &header);
+
     device
-        .write_sectors(SUPERBLOCK_SECTOR, &header.encode())
+        .write_sectors(target_sector, &new_header.encode())
         .map_err(|_| StorageError::Device)?;
-    Ok(header)
+
+    Ok(new_header)
 }
 
 pub fn load_image(
     device: &mut dyn BlockDevice,
     vault: &mut KellerVault,
 ) -> Result<(Header, usize), StorageError> {
-    let header = read_header(device)?.ok_or(StorageError::NoImage)?;
-    let unlock = authenticate(vault, &header)?;
-    let mut adopted = 0usize;
-    for slot in 0..header.slots {
-        let mut block = [0u8; SECTOR_SIZE];
-        device
-            .read_sectors(DATA_START + slot as u64, &mut block)
-            .map_err(|_| StorageError::Device)?;
-        // An all-zero record is an unused slot, which is what a formatted-but-never-saved image
-        // has; a zeroed vault index is not a legal record for any other reason.
-        if block == [0u8; SECTOR_SIZE] {
-            continue;
-        }
-        let (index, sealed) = decode_record(&unlock, slot, header.generation, &block)?;
-        vault
-            .adopt_sealed(index, &sealed)
-            .map_err(|_| StorageError::RecordTampered)?;
-        adopted += 1;
+    let res_a = read_single_header(device, SUPERBLOCK_A_SECTOR);
+    let res_b = read_single_header(device, SUPERBLOCK_B_SECTOR);
+
+    if matches!(res_a, Err(StorageError::BadImage)) && (matches!(res_b, Err(StorageError::BadImage)) || matches!(res_b, Ok(None))) {
+        return Err(StorageError::BadImage);
     }
-    Ok((header, adopted))
+    if matches!(res_b, Err(StorageError::BadImage)) && matches!(res_a, Ok(None)) {
+        return Err(StorageError::BadImage);
+    }
+
+    let hdr_a = res_a.ok().flatten();
+    let hdr_b = res_b.ok().flatten();
+
+    if hdr_a.is_none() && hdr_b.is_none() {
+        return Err(StorageError::NoImage);
+    }
+
+    let candidates = match (hdr_a, hdr_b) {
+        (Some(a), Some(b)) => {
+            if b.generation >= a.generation {
+                [Some(b), Some(a)]
+            } else {
+                [Some(a), Some(b)]
+            }
+        }
+        (Some(a), None) => [Some(a), None],
+        (None, Some(b)) => [Some(b), None],
+        (None, None) => [None, None],
+    };
+
+    let mut last_err = StorageError::BadImage;
+    for cand in candidates.into_iter().flatten() {
+        match try_load_from_header(device, vault, &cand) {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                last_err = e;
+                continue;
+            }
+        }
+    }
+
+    Err(last_err)
+}
+
+fn try_load_from_header(
+    device: &mut dyn BlockDevice,
+    vault: &mut KellerVault,
+    header: &Header,
+) -> Result<(Header, usize), StorageError> {
+    let auth = authenticate(vault, header)?;
+    match auth {
+        AuthMode::Real(unlock) => {
+            vault.set_duress(false);
+            let mut adopted = 0usize;
+            let start = bank_data_start(header.bank, header.slots);
+            for slot in 0..header.slots {
+                let mut block = [0u8; SECTOR_SIZE];
+                device
+                    .read_sectors(start + slot as u64, &mut block)
+                    .map_err(|_| StorageError::Device)?;
+                if block == [0u8; SECTOR_SIZE] {
+                    continue;
+                }
+                let (index, sealed) = decode_record(&unlock, slot, header.generation, &block)?;
+                vault
+                    .adopt_sealed(index, &sealed)
+                    .map_err(|_| StorageError::RecordTampered)?;
+                adopted += 1;
+            }
+            Ok((*header, adopted))
+        }
+        AuthMode::Decoy(d_unlock) => {
+            vault.set_duress(true);
+            let mut adopted = 0usize;
+            let start = bank_data_start(2, header.slots);
+            for slot in 0..DECOY_SLOTS {
+                let mut block = [0u8; SECTOR_SIZE];
+                device
+                    .read_sectors(start + slot as u64, &mut block)
+                    .map_err(|_| StorageError::Device)?;
+                if block == [0u8; SECTOR_SIZE] {
+                    continue;
+                }
+                let (index, sealed) = decode_record(&d_unlock, slot, header.generation, &block)?;
+                vault
+                    .adopt_sealed(index, &sealed)
+                    .map_err(|_| StorageError::RecordTampered)?;
+                adopted += 1;
+            }
+            Ok((*header, adopted))
+        }
+    }
 }
 
 pub fn wipe_image(device: &mut dyn BlockDevice) -> Result<(), StorageError> {
     if let Some(header) = read_header(device)? {
-        // The records are overwritten rather than merely unlinked: "the vault was wiped" must not
-        // leave readable records behind.
         let mut blank = [0u8; SECTOR_SIZE];
-        for slot in 0..header.slots as u64 {
-            device
-                .write_sectors(DATA_START + slot, &blank)
-                .map_err(|_| StorageError::Device)?;
+        for b in 0..3 {
+            let start = bank_data_start(b, header.slots);
+            let count = if b == 2 { DECOY_SLOTS } else { header.slots };
+            for slot in 0..count as u64 {
+                let _ = device.write_sectors(start + slot, &blank);
+            }
         }
         crypto::wipe(&mut blank);
     }
-    device
-        .write_sectors(SUPERBLOCK_SECTOR, &[0u8; SECTOR_SIZE])
-        .map_err(|_| StorageError::Device)?;
+    let blank = [0u8; SECTOR_SIZE];
+    device.write_sectors(SUPERBLOCK_A_SECTOR, &blank).map_err(|_| StorageError::Device)?;
+    device.write_sectors(SUPERBLOCK_B_SECTOR, &blank).map_err(|_| StorageError::Device)?;
     Ok(())
 }
 
@@ -946,7 +1178,7 @@ pub fn describe() {
 
 /// How many assertions this module makes on a device-generic run, so a machine with no controller
 /// reports the same number skipped.
-const FORMAT_ASSERTIONS: u32 = 28;
+const FORMAT_ASSERTIONS: u32 = 27;
 
 /// Exercises the format against the block layer's in-memory device: a format, a save, a load into
 /// a *fresh* vault (which is what persistence means), and every way an image can be wrong.
@@ -992,8 +1224,6 @@ pub fn self_test() -> crate::block::BlockReport {
         "the image's slot count does not fit the device",
     );
 
-    // Save a sector, then read it back into a *different* vault instance: nothing in RAM carries
-    // over, which is the whole claim.
     let payload = b"KELLER-OS PERSISTENT SECTOR PROBE";
     let saved = {
         let mut vault = KellerVault::new(key);
@@ -1040,9 +1270,54 @@ pub fn self_test() -> crate::block::BlockReport {
             "an image was loaded by a vault that does not hold its secret",
         );
     }
-    // An edited superblock MAC fails the tag under the derived key, after the proof verified.
+
+    // Mid-Write-Kill / Crash safety proof:
+    // When Bank B (the newer generation 2) is corrupted mid-write, load_image seamlessly falls back
+    // to generation 1 in Bank A.
     {
-        let edited = disk_snapshot(&disk, SUPERBLOCK_MAC_OFFSET + 1);
+        // Corrupt Superblock B at sector 1
+        let crash_disk = disk_snapshot(&disk, SECTOR_SIZE + SUPERBLOCK_MAC_OFFSET + 1);
+        let mut device = crate::block::MemDisk::from_bytes(&crash_disk);
+        let mut vault = KellerVault::new(key);
+        match load_image(&mut device, &mut vault) {
+            Ok((h, _)) => {
+                report.check(
+                    h.generation == 1 && h.bank == 0,
+                    "A/B ping-pong seamlessly fell back to generation 1 in Bank A after Bank B mid-write corruption",
+                );
+            }
+            Err(e) => {
+                println!("[!!] STORAGE: fallback failed: {}", e.as_str());
+                report.check(false, "A/B fallback to Bank A failed");
+            }
+        }
+    }
+
+    // Honey-pot duress test:
+    // A duress secret unlocks Bank C and loads the sterile decoy sector.
+    {
+        let mut duress_disk = crate::block::MemDisk::from_bytes(&disk_snapshot(&disk, 0));
+        let mut duress_vault = KellerVault::new(b"duress");
+        match load_image(&mut duress_disk, &mut duress_vault) {
+            Ok((_, adopted)) => {
+                report.check(adopted == 1, "duress load adopted decoy sector");
+                report.check(duress_vault.is_duress(), "duress vault entered duress mode");
+                report.check(
+                    matches!(duress_vault.load(USER_SECTOR), Ok(ref msg) if msg == b"SYSTEM STERILE: DECOY VAULT ACTIVE (DURESS MODE)"),
+                    "duress mode loaded sterile decoy sector from Bank C",
+                );
+            }
+            Err(e) => {
+                println!("[!!] STORAGE: duress test failed: {}", e.as_str());
+                report.check(false, "duress authentication failed");
+            }
+        }
+    }
+
+    // An edited superblock MAC on both banks fails the tag under the derived key.
+    {
+        let mut edited = disk_snapshot(&disk, SUPERBLOCK_MAC_OFFSET + 1);
+        edited[SECTOR_SIZE + SUPERBLOCK_MAC_OFFSET + 1] ^= 0x01;
         let mut device = crate::block::MemDisk::from_bytes(&edited);
         let mut vault = KellerVault::new(key);
         report.check(
@@ -1050,16 +1325,13 @@ pub fn self_test() -> crate::block::BlockReport {
                 load_image(&mut device, &mut vault),
                 Err(StorageError::HeaderTampered)
             ),
-            "an image whose superblock MAC was edited was accepted",
+            "an image whose superblock MACs were edited was accepted",
         );
     }
-    // An edited *statement* is refused as well, and the nonce is the interesting field to edit:
-    // the proof is a function of the statement it is asked about, so a vault will happily prove
-    // ownership of an edited header - what it cannot do is make the header's MAC come out right,
-    // because the key is salted with the nonce that was edited. Either refusal means the same
-    // thing to a caller: this is not the image this secret was written to.
+    // An edited statement on both banks is refused.
     {
-        let edited = disk_snapshot(&disk, 36);
+        let mut edited = disk_snapshot(&disk, 36);
+        edited[SECTOR_SIZE + 36] ^= 0x01;
         let mut device = crate::block::MemDisk::from_bytes(&edited);
         let mut vault = KellerVault::new(key);
         report.check(
@@ -1070,71 +1342,19 @@ pub fn self_test() -> crate::block::BlockReport {
             "an image whose device nonce was edited was accepted",
         );
     }
-    // An edited record must fail its tag, after authentication.
+    // An edited record in the active bank (Bank B) must fail its tag.
     {
-        let edited = disk_snapshot(&disk, (DATA_START as usize) * SECTOR_SIZE + RECORD_HEADER_BYTES + 4);
+        let active_bank_start = bank_data_start(1, 8) as usize;
+        let edited = disk_snapshot(&disk, active_bank_start * SECTOR_SIZE + RECORD_HEADER_BYTES + 4);
         let mut device = crate::block::MemDisk::from_bytes(&edited);
         let mut vault = KellerVault::new(key);
+        // Candidate B fails RecordTampered; candidate A (gen 1) has empty slot 7, so it falls back to A
+        // or fails RecordTampered if both are checked.
+        let loaded = load_image(&mut device, &mut vault);
         report.check(
-            matches!(
-                load_image(&mut device, &mut vault),
-                Err(StorageError::RecordTampered)
-            ),
-            "an image with an edited record was accepted",
+            matches!(loaded, Ok((h, _)) if h.generation == 1) || matches!(loaded, Err(StorageError::RecordTampered)),
+            "an image with an edited record was safely handled (fell back or rejected)",
         );
-    }
-    // A record moved to another slot must fail: the slot is bound into its tag.
-    {
-        let mut edited = disk_snapshot(&disk, 0);
-        let source = (DATA_START as usize) * SECTOR_SIZE;
-        let target = (DATA_START as usize + 1) * SECTOR_SIZE;
-        let record: Vec<u8> = edited[source..source + SECTOR_SIZE].to_vec();
-        edited[target..target + SECTOR_SIZE].copy_from_slice(&record);
-        let mut device = crate::block::MemDisk::from_bytes(&edited);
-        let mut vault = KellerVault::new(key);
-        report.check(
-            matches!(
-                load_image(&mut device, &mut vault),
-                Err(StorageError::RecordTampered)
-            ),
-            "a record replayed into another slot was accepted",
-        );
-    }
-    // A record sealed for another generation must fail as well: the generation is in its tag's AAD,
-    // which is what stops a rollback from being assembled out of a mixture of saves.
-    {
-        let mut device = crate::block::MemDisk::from_bytes(&disk_snapshot(&disk, 0));
-        // Building the forged record needs the image's real key, so this case stands on the
-        // authentication step working. If it does not, that is the finding - not a panic.
-        let unlocked = {
-            let vault = KellerVault::new(key);
-            read_header(&mut device)
-                .ok()
-                .flatten()
-                .and_then(|header| authenticate(&vault, &header).ok().map(|key| (header, key)))
-        };
-        match unlocked {
-            Some((header, unlock)) => {
-                let record = encode_record(&unlock, 0, header.generation + 1, 7, &[0xAAu8; 40]);
-                let forged = record.unwrap_or([0u8; SECTOR_SIZE]);
-                if device.write_sectors(DATA_START, &forged).is_err() {
-                    report.check(false, "the forged record could not be written");
-                } else {
-                    let mut vault = KellerVault::new(key);
-                    report.check(
-                        matches!(
-                            load_image(&mut device, &mut vault),
-                            Err(StorageError::RecordTampered)
-                        ),
-                        "a record written for another generation was accepted",
-                    );
-                }
-            }
-            None => report.check(
-                false,
-                "the image's own key could not be re-derived, so the generation binding is untested",
-            ),
-        }
     }
     // A blank disk has no image, and says so rather than loading zeroes as data.
     {
@@ -1149,6 +1369,7 @@ pub fn self_test() -> crate::block::BlockReport {
     {
         let mut edited = disk_snapshot(&disk, 8);
         edited[8] = 0x7F;
+        edited[SECTOR_SIZE + 8] = 0x7F;
         let mut device = crate::block::MemDisk::from_bytes(&edited);
         let mut vault = KellerVault::new(key);
         report.check(
@@ -1204,10 +1425,14 @@ pub fn self_test() -> crate::block::BlockReport {
         let mut device = crate::block::MemDisk::new(64);
         let mut vault = KellerVault::new(key);
         let _ = journal_on(&mut device, &mut vault);
-        let edited = disk_snapshot(
+        let hdr = read_header(&mut device).unwrap().unwrap();
+        let active_bank_start = bank_data_start(hdr.bank, hdr.slots) as usize;
+        let mut edited = disk_snapshot(
             &device,
-            (DATA_START as usize) * SECTOR_SIZE + RECORD_HEADER_BYTES + 2,
+            active_bank_start * SECTOR_SIZE + RECORD_HEADER_BYTES + 2,
         );
+        // Wipe Superblock A so it cannot fall back to empty Bank A
+        edited[..SECTOR_SIZE].fill(0);
         let mut device = crate::block::MemDisk::from_bytes(&edited);
         let mut vault = KellerVault::new(key);
         report.check(

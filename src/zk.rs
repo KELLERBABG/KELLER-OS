@@ -119,6 +119,33 @@ impl Witness {
         }
     }
 
+    /// Derives the witness from a passphrase and device_nonce using memory-hard Argon2id.
+    /// Prevents offline discrete-log brute force attacks against X = x·G stored in the superblock.
+    pub fn from_passphrase(passphrase: &[u8], device_nonce: &[u8; 32]) -> Self {
+        let mut wide = [0u8; 64];
+        crypto::argon2id(passphrase, device_nonce, &mut wide);
+        let scalar = Scalar::from_bytes_mod_order_wide(&wide);
+        crypto::wipe(&mut wide);
+        let commitment = (scalar * G).compress().to_bytes();
+        Self {
+            scalar,
+            commitment,
+        }
+    }
+
+    /// Flexible memory-cost variant of Argon2id witness derivation.
+    pub fn from_passphrase_m(passphrase: &[u8], device_nonce: &[u8; 32], m_cost: usize) -> Self {
+        let mut wide = [0u8; 64];
+        crypto::argon2id_m(passphrase, device_nonce, m_cost, &mut wide);
+        let scalar = Scalar::from_bytes_mod_order_wide(&wide);
+        crypto::wipe(&mut wide);
+        let commitment = (scalar * G).compress().to_bytes();
+        Self {
+            scalar,
+            commitment,
+        }
+    }
+
     /// The public commitment `X = x·G`. Safe to print, store and compare.
     pub fn commitment(&self) -> [u8; 32] {
         self.commitment

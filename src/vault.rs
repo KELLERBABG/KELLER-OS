@@ -39,6 +39,7 @@ pub struct KellerVault {
     sectors: Vec<VaultSector>,
     writes: u64,
     rejected_openings: u64,
+    pub is_duress: bool,
 }
 
 impl KellerVault {
@@ -63,6 +64,54 @@ impl KellerVault {
             sectors: Vec::new(),
             writes: 0,
             rejected_openings: 0,
+            is_duress: false,
+        }
+    }
+
+    /// Derives the vault root key and witness using memory-hard Argon2id from a user passphrase.
+    pub fn from_passphrase(passphrase: &[u8], device_nonce: &[u8; 32]) -> Self {
+        let mut key_material = [0u8; 64];
+        crypto::argon2id_m(passphrase, device_nonce, 1024, &mut key_material);
+        let mut data_vec = Vec::from(&key_material[..32]);
+        let shards = match crypto::rs_encode(&mut data_vec) {
+            Ok(shards) => shards,
+            Err(error) => {
+                crate::println!("[!!] VAULT: shard encoding failed: {}", error.as_str());
+                Vec::new()
+            }
+        };
+
+        let mut sector_key = [0u8; KEY_LEN];
+        crypto::hkdf_sha256(SECTOR_KEY_SALT, &key_material[..32], SECTOR_KEY_INFO, &mut sector_key);
+
+        let witness = Witness::from_passphrase_m(passphrase, device_nonce, 1024);
+        crypto::wipe(&mut key_material);
+
+        Self {
+            shards,
+            threshold: crypto::RS_DATA_SHARDS,
+            sector_key,
+            witness,
+            sectors: Vec::new(),
+            writes: 0,
+            rejected_openings: 0,
+            is_duress: false,
+        }
+    }
+
+    pub fn is_duress(&self) -> bool {
+        self.is_duress
+    }
+
+    pub fn set_duress(&mut self, duress: bool) {
+        self.is_duress = duress;
+        if duress {
+            for sector in self.sectors.iter_mut() {
+                crypto::wipe(&mut sector.sealed);
+            }
+            self.sectors.clear();
+            let decoy_body = b"SYSTEM STERILE: DECOY VAULT ACTIVE (DURESS MODE)";
+            let _ = self.store(0, decoy_body);
         }
     }
 

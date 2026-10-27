@@ -89,6 +89,8 @@ impl FixedSlotScheduler {
         if now.saturating_sub(self.slot_started_ms) < QUANTUM_MS {
             return;
         }
+        // Check PCI bus integrity against hotplug DMA devices on every scheduled tick
+        crate::pci::watchdog_check();
 
         let index = self.current % self.count;
         let slot = &mut self.tasks[index];

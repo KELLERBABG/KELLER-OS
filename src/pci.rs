@@ -9,6 +9,7 @@
 
 use crate::port::{inl, outl};
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 /// PCI configuration address/data port pair (mechanism #1).
 pub const CONFIG_ADDRESS: u16 = 0x0CF8;
@@ -614,3 +615,68 @@ pub fn self_test() -> bool {
     config_write_u32(device.bus, device.slot, device.function, COMMAND, command);
     (read_back & COMMAND_MEMORY_SPACE) == (masked & COMMAND_MEMORY_SPACE)
 }
+
+static BOOT_PCI_HASH: AtomicU64 = AtomicU64::new(0);
+
+/// Computes an FNV1a-64 hash over all present functions on PCI bus 0.
+pub fn compute_bus0_hash() -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for slot in 0..32u8 {
+        let header = config_read_u32(0, slot, 0, HEADER_TYPE);
+        if (header & 0xFFFF) == 0xFFFF {
+            continue;
+        }
+        let functions = if header & 0x80 != 0 { 8 } else { 1 };
+        for function in 0..functions {
+            let id = config_read_u32(0, slot, function, VENDOR_ID);
+            if (id & 0xFFFF) != 0xFFFF {
+                let class_rev = config_read_u32(0, slot, function, REVISION);
+                for b in slot.to_le_bytes() {
+                    hash ^= b as u64;
+                    hash = hash.wrapping_mul(0x100_0000_01b3);
+                }
+                for b in function.to_le_bytes() {
+                    hash ^= b as u64;
+                    hash = hash.wrapping_mul(0x100_0000_01b3);
+                }
+                for b in id.to_le_bytes() {
+                    hash ^= b as u64;
+                    hash = hash.wrapping_mul(0x100_0000_01b3);
+                }
+                for b in class_rev.to_le_bytes() {
+                    hash ^= b as u64;
+                    hash = hash.wrapping_mul(0x100_0000_01b3);
+                }
+            }
+        }
+    }
+    hash
+}
+
+/// Stores the baseline bus 0 PCI inventory hash at boot.
+pub fn init_watchdog() {
+    let hash = compute_bus0_hash();
+    BOOT_PCI_HASH.store(hash, Ordering::SeqCst);
+    crate::println!(
+        "[OK] PCI BUS WATCHDOG: armed (bus 0 baseline hash {:#018x})",
+        hash
+    );
+}
+
+/// Periodic check against hotplug-DMA attacks: panics if a new PCI device appears.
+pub fn watchdog_check() {
+    let baseline = BOOT_PCI_HASH.load(Ordering::Relaxed);
+    if baseline == 0 {
+        return;
+    }
+    let current = compute_bus0_hash();
+    if current != baseline {
+        crate::println!(
+            "\n[FATAL] PCI BUS TAMPER: hotplug device detected on bus 0 (current {:#018x} != baseline {:#018x})",
+            current,
+            baseline
+        );
+        unsafe { crate::panic::lockdown("pci hotplug detected") };
+    }
+}
+

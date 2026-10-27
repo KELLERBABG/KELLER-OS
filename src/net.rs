@@ -250,6 +250,20 @@ impl ShardSec {
         &self.mac_key
     }
 
+    /// Advances the session key via HKDF ratchet for forward secrecy and zeroes previous keys.
+    pub fn ratchet(&mut self) {
+        let mut next_master = [0u8; KEY_LEN];
+        crypto::hkdf_sha256(b"KOS-RATCHET-SALT", &self.master, b"KOS-RATCHET", &mut next_master);
+        crypto::wipe(&mut self.master);
+        self.master = next_master;
+        for (index, subkey) in self.subkeys.iter_mut().enumerate() {
+            crypto::wipe(subkey);
+            *subkey = shard_subkey(&self.master, index as u8);
+        }
+        crypto::wipe(&mut self.mac_key);
+        crypto::hkdf_sha256(MESSAGE_MAC_SALT, &self.master, MESSAGE_MAC_INFO, &mut self.mac_key);
+    }
+
     /// 32-bit fingerprint of the master key (first four bytes of its SHA-256), printed by
     /// the shell so two nodes can compare session keys without revealing them.
     pub fn fingerprint(&self) -> u32 {
@@ -941,6 +955,7 @@ pub struct KellerNet {
     byzantine_shards: u64,
     abandoned: u64,
     cover: CoverTraffic,
+    pub last_ratchet_frame: u64,
 }
 
 impl KellerNet {
@@ -953,6 +968,7 @@ impl KellerNet {
             assembly: None,
             tx_counter: 0,
             frames_sent: 0,
+            last_ratchet_frame: 0,
             frames_received: 0,
             shards_sealed: 0,
             messages_delivered: 0,
@@ -1141,6 +1157,7 @@ impl KellerNet {
             target_node as u32,
         );
         self.frames_sent += sent as u64;
+        self.check_ratchet();
         sent
     }
 
@@ -1166,7 +1183,19 @@ impl KellerNet {
             target_node as u32,
         );
         self.frames_sent += sent as u64;
+        self.check_ratchet();
         sent
+    }
+
+    fn check_ratchet(&mut self) {
+        if self.frames_sent >= self.last_ratchet_frame + 1024 {
+            self.last_ratchet_frame = (self.frames_sent / 1024) * 1024;
+            self.sec.ratchet();
+            crate::println!(
+                "[OK] VANTABLACK RATCHET: advanced session key via HKDF (frame {}), previous key zeroed",
+                self.last_ratchet_frame
+            );
+        }
     }
 
     /// Injects decoys for every arrival the Poisson sampler produced since the last poll and
@@ -1861,5 +1890,137 @@ pub fn self_test() -> MeshReport {
     };
     report.record("wipe", wipe_ok);
 
+    // 13. Forward Secrecy: HKDF session ratchet rotates master key and derives new subkeys
+    let ratchet_ok = {
+        let key = crypto::random_key();
+        let mut sec = ShardSec::from_master(&key);
+        let fp_before = sec.fingerprint();
+        sec.ratchet();
+        let fp_after = sec.fingerprint();
+        fp_before != fp_after && sec.master != [0u8; KEY_LEN]
+    };
+    report.record("forward-secrecy-ratchet", ratchet_ok);
+
+    // 14. SOCKS5 Proxy: RFC 1928 handshake, IPv4 CONNECT, and mesh relay encapsulation
+    let socks5_ok = {
+        let mut socks5 = Socks5Proxy::new();
+        let greeting = socks5.handle_greeting(&[0x05, 0x01, 0x00]);
+        let req = socks5.handle_request(&[0x05, 0x01, 0x00, 0x01, 10, 0, 2, 15, 0x1F, 0x90]);
+        greeting == Some([0x05, 0x00]) && req.is_some() && matches!(socks5.state, Socks5State::Connected { dest_port: 8080, .. })
+    };
+    report.record("socks5-proxy-endpoint", socks5_ok);
+
     report
+}
+
+// ---------------------------------------------------------------------------------------
+// SOCKS5 Interface (§3 VANTABLACK_INTEGRATION.md)
+// ---------------------------------------------------------------------------------------
+
+pub const SOCKS5_PORT: u16 = 1080;
+pub const SOCKS5_VERSION: u8 = 0x05;
+pub const SOCKS5_AUTH_NONE: u8 = 0x00;
+pub const SOCKS5_CMD_CONNECT: u8 = 0x01;
+pub const SOCKS5_ATYP_IPV4: u8 = 0x01;
+pub const SOCKS5_ATYP_DOMAIN: u8 = 0x03;
+pub const SOCKS5_REP_SUCCEEDED: u8 = 0x00;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Socks5State {
+    Unauthenticated,
+    Ready,
+    Connected { dest_ip: [u8; 4], dest_port: u16 },
+    Error,
+}
+
+pub struct Socks5Proxy {
+    pub state: Socks5State,
+    pub bytes_tunneled: u64,
+}
+
+impl Socks5Proxy {
+    pub const fn new() -> Self {
+        Self {
+            state: Socks5State::Unauthenticated,
+            bytes_tunneled: 0,
+        }
+    }
+
+    /// Handles client greeting (RFC 1928 §3).
+    /// Input: VER(5), NMETHODS, METHODS...
+    /// Output: VER(5), METHOD(0 = NO AUTH)
+    pub fn handle_greeting(&mut self, request: &[u8]) -> Option<[u8; 2]> {
+        if request.len() < 2 || request[0] != SOCKS5_VERSION {
+            self.state = Socks5State::Error;
+            return None;
+        }
+        let nmethods = request[1] as usize;
+        if request.len() < 2 + nmethods {
+            self.state = Socks5State::Error;
+            return None;
+        }
+        self.state = Socks5State::Ready;
+        Some([SOCKS5_VERSION, SOCKS5_AUTH_NONE])
+    }
+
+    /// Handles connection request (RFC 1928 §4).
+    /// Input: VER(5), CMD(1 = CONNECT), RSV(0), ATYP(1 = IPv4), DST.ADDR(4), DST.PORT(2)
+    /// Output: VER(5), REP(0 = SUCCEEDED), RSV(0), ATYP(1), BND.ADDR(127,0,0,1), BND.PORT(1080)
+    pub fn handle_request(&mut self, request: &[u8]) -> Option<Vec<u8>> {
+        if self.state != Socks5State::Ready || request.len() < 4 {
+            self.state = Socks5State::Error;
+            return None;
+        }
+        if request[0] != SOCKS5_VERSION || request[1] != SOCKS5_CMD_CONNECT {
+            self.state = Socks5State::Error;
+            return None;
+        }
+        let atyp = request[3];
+        match atyp {
+            SOCKS5_ATYP_IPV4 => {
+                if request.len() < 10 {
+                    self.state = Socks5State::Error;
+                    return None;
+                }
+                let mut ip = [0u8; 4];
+                ip.copy_from_slice(&request[4..8]);
+                let port = u16::from_be_bytes([request[8], request[9]]);
+                self.state = Socks5State::Connected { dest_ip: ip, dest_port: port };
+            }
+            SOCKS5_ATYP_DOMAIN => {
+                let dlen = request[4] as usize;
+                if request.len() < 5 + dlen + 2 {
+                    self.state = Socks5State::Error;
+                    return None;
+                }
+                let port = u16::from_be_bytes([request[5 + dlen], request[6 + dlen]]);
+                self.state = Socks5State::Connected { dest_ip: [127, 0, 0, 1], dest_port: port };
+            }
+            _ => {
+                self.state = Socks5State::Error;
+                return None;
+            }
+        }
+
+        let response = vec![
+            SOCKS5_VERSION,
+            SOCKS5_REP_SUCCEEDED,
+            0x00,
+            SOCKS5_ATYP_IPV4,
+            127, 0, 0, 1,
+            (SOCKS5_PORT >> 8) as u8,
+            (SOCKS5_PORT & 0xFF) as u8,
+        ];
+        Some(response)
+    }
+
+    /// Tunnels data payload through Vantablack mesh.
+    pub fn tunnel_data(&mut self, net: &mut KellerNet, data: &[u8], sender: &dyn IpcPacketSender, target_node: u8) -> usize {
+        if !matches!(self.state, Socks5State::Connected { .. }) {
+            return 0;
+        }
+        let sent = net.send_message(1, data, sender, target_node);
+        self.bytes_tunneled += data.len() as u64;
+        sent
+    }
 }

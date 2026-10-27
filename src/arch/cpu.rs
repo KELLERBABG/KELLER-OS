@@ -74,6 +74,9 @@ pub unsafe fn enable_fpu_sse() {
     core::arch::asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack));
     cr4 |= (1 << 9) | (1 << 10); // OSFXSR | OSXMMEXCPT
     cr4 |= 1 << 7; // PGE: global pages
+    if has_pcid() {
+        cr4 |= 1 << 17; // CR4.PCIDE: Process-Context Identifiers
+    }
     core::arch::asm!("mov cr4, {}", in(reg) cr4, options(nomem, nostack));
 }
 
@@ -135,4 +138,25 @@ pub fn vendor() -> [u8; 12] {
 /// on it for entropy and for the Poisson cover-traffic jitter.
 pub fn has_rdrand() -> bool {
     core::arch::x86_64::__cpuid(1).ecx & (1 << 30) != 0
+}
+
+/// True when the CPU advertises PCID (CPUID leaf 1, ECX bit 17).
+pub fn has_pcid() -> bool {
+    core::arch::x86_64::__cpuid(1).ecx & (1 << 17) != 0
+}
+
+/// MSR register addresses for speculative domain switch barriers.
+pub const MSR_IA32_PRED_CMD: u32 = 0x49;
+pub const MSR_IA32_FLUSH_CMD: u32 = 0x10B;
+
+/// True when the CPU supports Indirect Branch Prediction Barrier (IBPB via IA32_PRED_CMD).
+pub fn has_ibpb() -> bool {
+    let leaf7 = core::arch::x86_64::__cpuid_count(7, 0);
+    leaf7.edx & (1 << 26) != 0
+}
+
+/// True when the CPU supports L1D cache flushing (via IA32_FLUSH_CMD).
+pub fn has_l1d_flush() -> bool {
+    let leaf7 = core::arch::x86_64::__cpuid_count(7, 0);
+    leaf7.edx & (1 << 28) != 0
 }

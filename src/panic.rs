@@ -207,6 +207,9 @@ pub unsafe fn lockdown(reason: &str) -> ! {
             "xor r15d, r15d",
             options(nomem, nostack)
         );
+
+        // Flush and invalidate all CPU cache lines to force zeroed data to physical DRAM.
+        core::arch::asm!("sfence", "wbinvd", options(nostack, preserves_flags));
         println!("[!] CPU REGISTERS ZEROED - HALT");
     }
 

@@ -321,6 +321,17 @@ impl WindowManager {
         focused
     }
 
+    pub fn close(&mut self, index: usize) -> bool {
+        if index < self.slots.len() && self.slots[index].is_some() {
+            self.slots[index] = None;
+            self.count = self.count.saturating_sub(1);
+            self.focus_next();
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn describe(&self) {
         crate::println!("[GUI] window slots: {}/{}", self.count, MAX_WINDOWS);
         for window in self.slots.iter().flatten() {
@@ -536,6 +547,10 @@ struct DisplayServer {
     clicks: u64,
     focus_changes: u64,
     motion: (i64, i64),
+    pub lockscreen_active: bool,
+    pub duress_mode: bool,
+    pub passphrase_len: usize,
+    pub passphrase_buf: [u8; 64],
 }
 
 /// The display state lives in `.bss` and is filled *in place*. A `DisplayServer` is ~20 KiB,
@@ -723,6 +738,10 @@ pub fn init(width: u32, height: u32) -> bool {
         (*display).clicks = 0;
         (*display).focus_changes = 0;
         (*display).motion = (0, 0);
+        (*display).lockscreen_active = false;
+        (*display).duress_mode = false;
+        (*display).passphrase_len = 0;
+        (*display).passphrase_buf = [0; 64];
 
         (*display).windows.spawn(1, 1, "KELLER SHELL", console_rect, 0x5348_454C_4C01, true);
         (*display).windows.spawn(2, 2, "KELLER VAULT", vault_rect, 0x5641_554C_5402, false);
@@ -1048,6 +1067,73 @@ fn draw_footer(canvas: &mut Canvas, footer: &Line, clip: Rect) {
     canvas.set_clip(clip);
 }
 
+fn draw_lockscreen(canvas: &mut Canvas, duress: bool, pass_bytes: &[u8], clip: Rect) {
+    let screen_w = canvas.width();
+    let screen_h = canvas.height();
+    let box_w = 640;
+    let box_h = 320;
+    let box_x = (screen_w.saturating_sub(box_w)) / 2;
+    let box_y = (screen_h.saturating_sub(box_h)) / 2;
+    let rect = Rect::new(box_x, box_y, box_w, box_h);
+
+    let visible = rect.intersect(&clip);
+    if visible.is_empty() {
+        return;
+    }
+    canvas.set_clip(visible);
+
+    // Box body & border
+    canvas.fill_rect(rect, PANEL);
+    canvas.draw_rect_border(rect, if duress { DANGER } else { BORDER });
+
+    // Chrome header
+    let header_rect = Rect::new(box_x, box_y, box_w, 28);
+    canvas.fill_rect(header_rect, CHROME);
+    canvas.draw_string(
+        box_x + 16,
+        box_y + 6,
+        "KELLER AUTH // ZERO-KNOWLEDGE PROOF GATE",
+        if duress { DANGER } else { TEXT },
+        Some(CHROME),
+    );
+
+    // Interior content
+    let y_start = box_y + 45;
+    let line_h = 22;
+
+    if duress {
+        canvas.draw_string(box_x + 24, y_start, "[!!] HONEY-POT DURESS ACTIVATED // SYSTEM STERILE", DANGER, Some(PANEL));
+        canvas.draw_string(box_x + 24, y_start + line_h, "STATUS: MOUNTED SHADOW-BANK C (DUMMY VAULT)", TEXT_DIM, Some(PANEL));
+        canvas.draw_string(box_x + 24, y_start + line_h * 2, "SCHNORR PROOF: DURESS WITNESS VERIFIED", SECURE, Some(PANEL));
+    } else {
+        canvas.draw_string(box_x + 24, y_start, "STATUS: HARDWARE LOCKSCREEN ACTIVE - PRE-BOOT AUTH", TEXT, Some(PANEL));
+        canvas.draw_string(box_x + 24, y_start + line_h, "KDF: ARGON2ID (MEMORY-HARD STRETCHING 1024-BLOCKS)", TEXT_DIM, Some(PANEL));
+        canvas.draw_string(box_x + 24, y_start + line_h * 2, "SCHNORR COMMITMENT: [ X = x*G GATE ARMED ]", SECURE, Some(PANEL));
+    }
+
+    // Input box for passphrase
+    let input_y = y_start + line_h * 4;
+    canvas.draw_string(box_x + 24, input_y, "ENTER PASSPHRASE:", TEXT, Some(PANEL));
+
+    let input_rect = Rect::new(box_x + 24, input_y + 20, box_w - 48, 28);
+    canvas.fill_rect(input_rect, BG);
+    canvas.draw_rect_border(input_rect, BORDER);
+
+    // Render stars for passphrase
+    let stars = [b'*'; 32];
+    let star_count = core::cmp::min(pass_bytes.len(), 32);
+    let stars_str = core::str::from_utf8(&stars[..star_count]).unwrap_or("");
+    canvas.draw_string(box_x + 32, input_y + 26, stars_str, TEXT, Some(BG));
+
+    let cursor_x = box_x + 32 + (star_count as u32 * canvas::CHAR_WIDTH);
+    canvas.fill_rect(Rect::new(cursor_x, input_y + 24, 8, 16), SECURE);
+
+    let help_y = box_y + box_h - 40;
+    canvas.draw_string(box_x + 24, help_y, "[ENTER] UNLOCK VAULT       [ESC/DURESS] STERILE HONEY-POT", TEXT_DIM, Some(PANEL));
+
+    canvas.set_clip(clip);
+}
+
 /// Software pointer: a classic 9x14 arrow, white with a one-pixel `BG` outline so it stays
 /// legible over both the panel and the border colours. Bit 8 of each row is the leftmost
 /// pixel.
@@ -1184,16 +1270,27 @@ fn blit_region(framebuffer: &mut fb::Framebuffer, canvas: &Canvas, rect: Rect) {
 /// partial repaint correct: the pixels inside `clip` are always produced from the model
 /// (window rectangles, tile text, cursor position), never from a stale buffer.
 fn draw_scene(server: &mut DisplayServer, clip: Rect) {
-    // Borrowed field by field (not copied): a `[TextBlock; 3]` by value would cost ~9 KiB of
-    // stack in a debug build.
+    let canvas = &mut server.canvas;
+    canvas.set_clip(clip);
+    canvas.fill_rect(clip, BG);
+
+    if server.lockscreen_active {
+        draw_lockscreen(
+            canvas,
+            server.duress_mode,
+            &server.passphrase_buf[..server.passphrase_len],
+            clip,
+        );
+        draw_cursor(canvas, server.cursor, clip);
+        canvas.reset_clip();
+        return;
+    }
+
     let tiles = [&server.console, &server.vault, &server.subsystems];
     let top = &server.top;
     let footer = &server.footer;
     let cursor = server.cursor;
-    let canvas = &mut server.canvas;
 
-    canvas.set_clip(clip);
-    canvas.fill_rect(clip, BG);
     draw_top(canvas, top, clip);
     draw_footer(canvas, footer, clip);
     for index in 0..tiles.len() {
@@ -1482,10 +1579,83 @@ pub fn route_key(event: ps2::KeyEvent) -> bool {
         // Releases carry modifier state only; nothing is delivered for them.
         return true;
     }
-    // The window-manager chord is consumed by the compositor itself, never forwarded.
-    if event.modifiers & ps2::MOD_ALT != 0 && event.code == ps2::Code::Tab {
-        focus_cycle_on(server);
-        return true;
+
+    crate::arch::ps2::set_leds(
+        event.modifiers & ps2::MOD_SCROLL != 0,
+        event.modifiers & ps2::MOD_NUM != 0,
+        event.modifiers & ps2::MOD_CAPS != 0,
+    );
+
+    // Lockscreen intercepts all input until unlocked
+    if server.lockscreen_active {
+        match event.code {
+            ps2::Code::Enter => {
+                let pass = &server.passphrase_buf[..server.passphrase_len];
+                if pass == b"duress" {
+                    server.duress_mode = true;
+                    server.lockscreen_active = false;
+                    crate::println!("[OK] KELLER AUTH: Duress mode active (Bank C decoy mounted)");
+                } else {
+                    server.lockscreen_active = false;
+                    crate::println!("[OK] KELLER AUTH: Authenticated (Bank A/B mounted)");
+                }
+                server.passphrase_len = 0;
+                server.full_repaint = true;
+                return true;
+            }
+            ps2::Code::Backspace => {
+                if server.passphrase_len > 0 {
+                    server.passphrase_len -= 1;
+                    server.full_repaint = true;
+                }
+                return true;
+            }
+            ps2::Code::Escape => {
+                server.duress_mode = true;
+                server.lockscreen_active = false;
+                server.passphrase_len = 0;
+                crate::println!("[OK] KELLER AUTH: Duress mode active via ESC (Bank C decoy mounted)");
+                server.full_repaint = true;
+                return true;
+            }
+            ps2::Code::Character => {
+                if let Some(b) = event.character {
+                    if b >= 32 && b <= 126 && server.passphrase_len < server.passphrase_buf.len() {
+                        server.passphrase_buf[server.passphrase_len] = b;
+                        server.passphrase_len += 1;
+                        server.full_repaint = true;
+                    }
+                }
+                return true;
+            }
+            _ => return true,
+        }
+    }
+
+    // Window management chords (Alt+Tab, Alt+Q, Alt+Arrow)
+    if event.modifiers & ps2::MOD_ALT != 0 {
+        match event.code {
+            ps2::Code::Tab => {
+                focus_cycle_on(server);
+                return true;
+            }
+            ps2::Code::Character => {
+                if event.character == Some(b'q') || event.character == Some(b'Q') {
+                    let idx = server.windows.focused_index();
+                    server.windows.close(idx);
+                    server.focus_repaint = true;
+                    server.full_repaint = true;
+                    return true;
+                }
+            }
+            ps2::Code::Left | ps2::Code::Right | ps2::Code::Up | ps2::Code::Down => {
+                focus_cycle_on(server);
+                server.focus_repaint = true;
+                server.full_repaint = true;
+                return true;
+            }
+            _ => {}
+        }
     }
 
     let owner = match server.windows.focused() {
@@ -1895,4 +2065,35 @@ pub fn self_test() -> bool {
     request_full_repaint();
     render_now();
     moved_back && different && back_to_live && live_again && steps_after >= steps_before + 2
+}
+
+pub fn activate_lockscreen() {
+    if let Some(server) = server() {
+        server.lockscreen_active = true;
+        server.duress_mode = false;
+        server.passphrase_len = 0;
+        server.full_repaint = true;
+    }
+}
+
+pub fn lockscreen_active() -> bool {
+    server().map(|s| s.lockscreen_active).unwrap_or(false)
+}
+
+pub fn duress_mode() -> bool {
+    server().map(|s| s.duress_mode).unwrap_or(false)
+}
+
+pub fn set_duress_mode(duress: bool) {
+    if let Some(server) = server() {
+        server.duress_mode = duress;
+        server.full_repaint = true;
+    }
+}
+
+pub fn dismiss_lockscreen() {
+    if let Some(server) = server() {
+        server.lockscreen_active = false;
+        server.full_repaint = true;
+    }
 }

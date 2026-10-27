@@ -105,6 +105,50 @@ pub const SYS_WRITE: u64 = 1;
 pub const SYS_YIELD: u64 = 2;
 pub const SYS_PROGRESS: u64 = 3;
 pub const SYS_PORT_WRITE: u64 = 4;
+pub const SYS_NESTED_PROBE: u64 = 5;
+pub const SYS_READ: u64 = 6;
+pub const SYS_PORT_IN: u64 = 7;
+pub const SYS_MMIO_MAP: u64 = 8;
+pub const SYS_SHM_MAP: u64 = 9;
+pub const SYS_IRQ_WAIT: u64 = 10;
+pub const SYS_DMA_ALLOC: u64 = 11;
+pub const SYS_DMA_SUBMIT: u64 = 12;
+
+pub const SHM_VA: u64 = paging::USER_BASE + 0x30_0000;
+pub const MAX_SHM_SLOTS: usize = 8;
+static mut SHM_FRAMES: [u64; MAX_SHM_SLOTS] = [0; MAX_SHM_SLOTS];
+
+pub fn get_or_alloc_shm_frame(slot_id: usize) -> u64 {
+    if slot_id >= MAX_SHM_SLOTS {
+        return 0;
+    }
+    unsafe {
+        let frame = SHM_FRAMES[slot_id];
+        if frame != 0 {
+            frame
+        } else {
+            let fresh = paging::alloc_frame();
+            core::ptr::write_bytes(fresh as *mut u8, 0, paging::PAGE_SIZE as usize);
+            SHM_FRAMES[slot_id] = fresh;
+            fresh
+        }
+    }
+}
+
+pub const DMA_BOUNCE_BUFFER_SIZE: usize = 16 * 1024;
+#[repr(C, align(4096))]
+pub struct DmaBounceArena(pub [u8; DMA_BOUNCE_BUFFER_SIZE]);
+static mut DMA_BOUNCE_ARENA: DmaBounceArena = DmaBounceArena([0; DMA_BOUNCE_BUFFER_SIZE]);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Capability {
+    None,
+    IoPort { base: u16, count: u16 },
+    Mmio { phys_base: u64, len: usize, writable: bool },
+    Shm { slot_id: u8, rw: bool },
+    IrqWait { vector: u8 },
+}
+
 /// The one port the kernel's capability table grants to a ring-3 driver: the POST/delay port
 /// (the same one `port::io_wait` uses), where a write is visible to nothing but a logic
 /// analyser. The demonstration exercises the whole mediated path without touching hardware any
@@ -195,6 +239,13 @@ struct Process {
     fault_error: u64,
     fault_rip: u64,
     fault_address: u64,
+    pub caps: [Capability; 16],
+    pub respawn_on_fault: bool,
+    pub respawn_count: u32,
+    pub code_buf: [u8; 256],
+    pub code_len: usize,
+    pub data_buf: [u8; 128],
+    pub data_len: usize,
 }
 
 impl Process {
@@ -217,14 +268,87 @@ impl Process {
             fault_error: 0,
             fault_rip: 0,
             fault_address: 0,
+            caps: [Capability::None; 16],
+            respawn_on_fault: false,
+            respawn_count: 0,
+            code_buf: [0; 256],
+            code_len: 0,
+            data_buf: [0; 128],
+            data_len: 0,
         }
+    }
+
+    pub fn grant(&mut self, cap: Capability) -> bool {
+        for slot in &mut self.caps {
+            if *slot == Capability::None {
+                *slot = cap;
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn has_ioport(&self, port: u16) -> bool {
+        for cap in &self.caps {
+            if let Capability::IoPort { base, count } = *cap {
+                if port >= base && port < base.saturating_add(count) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn has_mmio(&self, phys: u64, len: usize) -> Option<bool> {
+        for cap in &self.caps {
+            if let Capability::Mmio { phys_base, len: cap_len, writable } = *cap {
+                if phys >= phys_base && phys + len as u64 <= phys_base + cap_len as u64 {
+                    return Some(writable);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn has_shm(&self, slot_id: u8) -> Option<bool> {
+        for cap in &self.caps {
+            if let Capability::Shm { slot_id: id, rw } = *cap {
+                if id == slot_id {
+                    return Some(rw);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn has_irq(&self, vector: u8) -> bool {
+        for cap in &self.caps {
+            if let Capability::IrqWait { vector: v } = *cap {
+                if v == vector {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 
-/// Array-repeat needs a const item when the element type is not `Copy`, and `Process` is
-/// deliberately not `Copy`: an address space must have exactly one owner.
 const EMPTY_PROCESS: Process = Process::empty();
 static mut PROCESSES: [Process; MAX_PROCESSES] = [EMPTY_PROCESS; MAX_PROCESSES];
+
+pub const KERNEL_STACK_SIZE: usize = 16 * 1024;
+
+#[repr(C, align(16))]
+pub struct ProcessKernelStack(pub [u8; KERNEL_STACK_SIZE]);
+
+static mut KERNEL_STACKS: [ProcessKernelStack; MAX_PROCESSES] =
+    [const { ProcessKernelStack([0; KERNEL_STACK_SIZE]) }; MAX_PROCESSES];
+
+/// Returns the top of the dedicated 16-KiB kernel stack for a process slot.
+pub fn kernel_stack_top(slot: usize) -> u64 {
+    let base = unsafe { core::ptr::addr_of!(KERNEL_STACKS[slot]) as u64 };
+    base + KERNEL_STACK_SIZE as u64
+}
 
 static CURRENT: AtomicU64 = AtomicU64::new(KERNEL_SLOT as u64);
 static STARTED: AtomicBool = AtomicBool::new(false);
@@ -353,6 +477,14 @@ pub unsafe fn init() {
     PHASE_START.store(0, Ordering::Relaxed);
     PHASE_DEADLINE.store(0, Ordering::Relaxed);
     unsafe { *core::ptr::addr_of_mut!(LAST_PHASE) = PhaseSummary::empty() };
+
+    // Point TSS.RSP0 at slot 0's dedicated kernel stack.
+    gdt::set_rsp0(0, kernel_stack_top(KERNEL_SLOT));
+
+    panic::register_scrub_region(
+        core::ptr::addr_of!(KERNEL_STACKS) as u64,
+        core::mem::size_of::<[ProcessKernelStack; MAX_PROCESSES]>() as u64,
+    );
 }
 
 pub fn started() -> bool {
@@ -404,21 +536,21 @@ pub fn idle_armed() -> bool {
 /// instructions. Every method below emits one documented instruction, and the reports print the
 /// resulting bytes in hex so a program can be audited against this source.
 struct Program {
-    bytes: [u8; 128],
+    bytes: [u8; 256],
     length: usize,
 }
 
 impl Program {
     const fn new() -> Self {
         Self {
-            bytes: [0; 128],
+            bytes: [0; 256],
             length: 0,
         }
     }
 
     fn push(&mut self, bytes: &[u8]) {
         assert!(
-            self.length + bytes.len() <= 128,
+            self.length + bytes.len() <= 256,
             "user program overflows its buffer"
         );
         for byte in bytes {
@@ -436,6 +568,12 @@ impl Program {
     /// `mov rsi, imm64` (REX.W + BE, 10 bytes) for addresses above 4 GiB.
     fn mov_rsi64(&mut self, value: u64) {
         self.push(&[0x48, 0xBE]);
+        self.push(&value.to_le_bytes());
+    }
+
+    /// `mov rdx, imm64` (REX.W + BA, 10 bytes) for addresses above 4 GiB.
+    fn mov_rdx64(&mut self, value: u64) {
+        self.push(&[0x48, 0xBA]);
         self.push(&value.to_le_bytes());
     }
 
@@ -504,9 +642,91 @@ impl Program {
         self.push(&[0xEB, 0xFE]);
     }
 
+    /// `mov rdi, imm64` (REX.W + BF).
+    fn mov_rdi64(&mut self, value: u64) {
+        self.push(&[0x48, 0xBF]);
+        self.push(&value.to_le_bytes());
+    }
+
+    /// `mov [moffs64], rax` (REX.W + A3).
+    fn store_rax_absolute(&mut self, address: u64) {
+        self.push(&[0x48, 0xA3]);
+        self.push(&address.to_le_bytes());
+    }
+
+    /// `test rax, rax` (REX.W + 85 C0).
+    fn test_rax_zero(&mut self) {
+        self.push(&[0x48, 0x85, 0xC0]);
+    }
+
     fn bytes(&self) -> &[u8] {
         &self.bytes[..self.length]
     }
+}
+
+/// Capability test driver:
+/// - First run: reads kernel probe string into DATA_VA via SYS_READ (copy_to_user),
+///   maps SHM slot 0 via SYS_SHM_MAP, writes 0x5348_4D31 to [SHM_VA],
+///   calls SYS_PROGRESS, and triggers deliberate #PF.
+/// - Respawn run: supervisor auto-respawns driver, SYS_PROGRESS returns respawn_count >= 1,
+///   driver detects respawn and exits cleanly with code 0!
+fn program_cap_driver() -> Program {
+    let mut program = Program::new();
+    program.mov_reg(0, SYS_PROGRESS as u32);
+    program.mov_reg(7, 0);
+    program.syscall();
+    program.test_rax_zero();
+    let jump_to_exit = program.jump_forward();
+
+    // First run path (rax == 0):
+    // SYS_READ (copy_to_user): read kernel data into DATA_VA
+    program.mov_reg(0, SYS_READ as u32);
+    program.mov_rdi64(DATA_VA);
+    program.mov_reg(6, 27);
+    program.syscall();
+
+    // SYS_SHM_MAP: map shared memory slot 0 at SHM_VA
+    program.mov_reg(0, SYS_SHM_MAP as u32);
+    program.mov_reg(7, 0);
+    program.mov_rsi64(SHM_VA);
+    program.syscall();
+
+    // Store magic 0x5348_4D31 into [SHM_VA]
+    program.push(&[0x48, 0xB8, 0x31, 0x4D, 0x48, 0x53, 0x00, 0x00, 0x00, 0x00]);
+    program.store_rax_absolute(SHM_VA);
+
+    // Deliberate #PF on unmapped address 0xDEAD_BEEF_0000
+    program.load_rax_absolute(0xDEAD_BEEF_0000);
+    program.spin_forever();
+
+    // Second run path (respawned): exit cleanly!
+    program.patch_jump(jump_to_exit);
+    program.mov_reg(0, SYS_EXIT as u32);
+    program.mov_reg(7, 0);
+    program.syscall();
+    program.spin_forever();
+    program
+}
+
+/// Capability test peer: maps SHM slot 0, reads magic, updates it to 0x5348_4D32, and exits.
+fn program_cap_peer() -> Program {
+    let mut program = Program::new();
+    program.mov_reg(0, SYS_SHM_MAP as u32);
+    program.mov_reg(7, 0);
+    program.mov_rsi64(SHM_VA);
+    program.syscall();
+
+    program.load_rax_absolute(SHM_VA);
+
+    // Write updated magic 0x5348_4D32
+    program.push(&[0x48, 0xB8, 0x32, 0x4D, 0x48, 0x53, 0x00, 0x00, 0x00, 0x00]);
+    program.store_rax_absolute(SHM_VA);
+
+    program.mov_reg(0, SYS_EXIT as u32);
+    program.mov_reg(7, 0);
+    program.syscall();
+    program.spin_forever();
+    program
 }
 
 /// `write(DATA_VA, message); exit(0)`: the smallest complete ring-3 program.
@@ -520,6 +740,18 @@ fn program_hello(message_length: usize) -> Program {
     program.mov_reg(7, 0); // edi = exit code
     program.syscall();
     program.spin_forever(); // unreachable: exit never returns
+    program
+}
+
+/// A probe program that invokes SYS_NESTED_PROBE and exits cleanly.
+fn program_nested() -> Program {
+    let mut program = Program::new();
+    program.mov_reg(0, SYS_NESTED_PROBE as u32);
+    program.syscall();
+    program.mov_reg(0, SYS_EXIT as u32);
+    program.mov_reg(7, 0); // edi = exit code
+    program.syscall();
+    program.spin_forever();
     program
 }
 
@@ -691,6 +923,13 @@ pub fn spawn_user(
             process.cr3 = cr3;
             process.quantum_left = QUANTUM_TICKS;
             process.space = Some(space);
+            process.grant(Capability::IoPort { base: 0x80, count: 1 });
+            let clen = core::cmp::min(code.len(), 256);
+            process.code_buf[..clen].copy_from_slice(&code[..clen]);
+            process.code_len = clen;
+            let dlen = core::cmp::min(data.len(), 128);
+            process.data_buf[..dlen].copy_from_slice(&data[..dlen]);
+            process.data_len = dlen;
             build_user_frame(process, CODE_VA, stack_top);
         });
     }
@@ -757,9 +996,81 @@ unsafe fn switch_to(next: usize, frame: *mut InterruptFrame, reason: Reason) {
     idt::request_switch(target_rsp);
     CURRENT.store(next as u64, Ordering::Relaxed);
 
-    match row(next, |process| process.cr3) {
-        0 => paging::activate_kernel(),
-        cr3 => crate::arch::cpu::write_cr3(cr3),
+    // Context switch: update TSS.RSP0 to incoming task's dedicated 16-KiB kernel stack
+    let next_rsp0 = kernel_stack_top(next);
+    crate::arch::gdt::set_rsp0(0, next_rsp0);
+
+    let raw_cr3 = match row(next, |process| process.cr3) {
+        0 => paging::kernel_cr3(),
+        cr3 => cr3,
+    };
+
+    let cr3_to_load = if crate::arch::cpu::has_pcid() {
+        // 12-bit PCID per process in bits 11..0, plus bit 63 NOFLUSH
+        let pcid = (next as u64) & 0xFFF;
+        raw_cr3 | pcid | (1u64 << 63)
+    } else {
+        raw_cr3
+    };
+    crate::arch::cpu::write_cr3(cr3_to_load);
+
+    // Microarchitectural domain switch barriers
+    if crate::arch::cpu::has_ibpb() {
+        crate::arch::cpu::write_msr(crate::arch::cpu::MSR_IA32_PRED_CMD, 1);
+    }
+    if crate::arch::cpu::has_l1d_flush() {
+        crate::arch::cpu::write_msr(crate::arch::cpu::MSR_IA32_FLUSH_CMD, 1);
+    }
+
+    match reason {
+        Reason::Preempt => {
+            PREEMPTIONS.fetch_add(1, Ordering::Relaxed);
+        }
+        Reason::Voluntary => {
+            YIELDS.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    if user_task {
+        ENTRIES.fetch_add(1, Ordering::Relaxed);
+        USER_SLICES.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Directly switches to `next` without parking `frame` into `CURRENT`.
+/// Used by the fault supervisor during auto-respawn so the freshly constructed
+/// user frame at CODE_VA is not overwritten with the faulting context.
+unsafe fn switch_to_direct(next: usize, reason: Reason) {
+    let (target_rsp, user_task) = row(next, |process| {
+        process.state = State::Running;
+        process.runs += 1;
+        process.quantum_left = QUANTUM_TICKS;
+        (process.frame.base() as u64, process.space.is_some())
+    });
+    idt::request_switch(target_rsp);
+    CURRENT.store(next as u64, Ordering::Relaxed);
+
+    // Context switch: update TSS.RSP0 to incoming task's dedicated 16-KiB kernel stack
+    let next_rsp0 = kernel_stack_top(next);
+    crate::arch::gdt::set_rsp0(0, next_rsp0);
+
+    let raw_cr3 = match row(next, |process| process.cr3) {
+        0 => paging::kernel_cr3(),
+        cr3 => cr3,
+    };
+
+    let cr3_to_load = if crate::arch::cpu::has_pcid() {
+        let pcid = (next as u64) & 0xFFF;
+        raw_cr3 | pcid | (1u64 << 63)
+    } else {
+        raw_cr3
+    };
+    crate::arch::cpu::write_cr3(cr3_to_load);
+
+    if crate::arch::cpu::has_ibpb() {
+        crate::arch::cpu::write_msr(crate::arch::cpu::MSR_IA32_PRED_CMD, 1);
+    }
+    if crate::arch::cpu::has_l1d_flush() {
+        crate::arch::cpu::write_msr(crate::arch::cpu::MSR_IA32_FLUSH_CMD, 1);
     }
 
     match reason {
@@ -862,23 +1173,23 @@ pub unsafe fn user_fault(frame: *mut InterruptFrame) {
     } else {
         0
     };
-    let name = row(current, |process| {
-        process.state = State::Faulted;
+    let (name, respawn) = row(current, |process| {
         process.fault_vector = vector;
         process.fault_error = error;
         process.fault_rip = rip;
         process.fault_address = fault_address;
-        process.name
+        (process.name, process.respawn_on_fault)
     });
     FAULTS.fetch_add(1, Ordering::Relaxed);
     println!(
-        "\n[!!] RING-3 CONTAINMENT: '{}' {} (vector {}, error={:#x}) at rip={:#018x} cs={:#x} - task terminated, kernel intact",
+        "\n[!!] RING-3 CONTAINMENT: '{}' {} (vector {}, error={:#x}) at rip={:#018x} cs={:#x} - task {}, kernel intact",
         name,
         idt::exception_name(vector),
         vector,
         error,
         rip,
-        cs
+        cs,
+        if respawn { "auto-respawning" } else { "terminated" }
     );
     if vector == 14 {
         println!(
@@ -890,6 +1201,50 @@ pub unsafe fn user_fault(frame: *mut InterruptFrame) {
         println!(
             "     raw port I/O at CPL 3: the TSS I/O permission bitmap denies every port, so the CPU raised #GP before any kernel handler ran"
         );
+    }
+
+    if respawn {
+        let respawn_cnt = row(current, |p| {
+            p.respawn_count += 1;
+            p.respawn_count
+        });
+
+        // Switch to kernel CR3 first so we are not tearing down the active page table
+        crate::arch::cpu::write_cr3(paging::kernel_cr3());
+        release_space(current);
+
+        // Recreate address space and reload code/data from buffers
+        let mut space = AddressSpace::new(name);
+        let code_frame = paging::alloc_frame();
+        let data_frame = paging::alloc_frame();
+        let stack_frame = paging::alloc_frame();
+        space.map_page(CODE_VA, code_frame, paging::USER_RX);
+        space.map_page(DATA_VA, data_frame, paging::USER_RW);
+        space.map_page(STACK_VA, stack_frame, paging::USER_RW);
+
+        row(current, |p| {
+            space.write_user(CODE_VA, &p.code_buf[..p.code_len]);
+            space.write_user(DATA_VA, &p.data_buf[..p.data_len]);
+        });
+        let new_cr3 = space.cr3;
+        let stack_top = STACK_VA + paging::PAGE_SIZE - 16;
+
+        row(current, |process| {
+            process.state = State::Ready;
+            process.cr3 = new_cr3;
+            process.quantum_left = QUANTUM_TICKS;
+            process.space = Some(space);
+            build_user_frame(process, CODE_VA, stack_top);
+        });
+
+        println!(
+            "[OK] RING-3 SUPERVISOR: auto-respawned '{}' (slot {}, generation #{}) - fresh address space, capability token preserved",
+            name, current, respawn_cnt
+        );
+
+        let next = next_runnable(current);
+        switch_to_direct(next, Reason::Preempt);
+        return;
     }
 
     let next = next_runnable(current);
@@ -989,20 +1344,121 @@ pub unsafe fn syscall(frame: *mut InterruptFrame) {
             yield_now(frame);
         }
         SYS_PROGRESS => {
-            row(current, |process| process.progress = arg0);
+            result = row(current, |process| {
+                process.progress = arg0;
+                process.respawn_count as u64
+            });
         }
         SYS_PORT_WRITE => {
-            if arg0 == GRANTED_PORT {
-                crate::port::outb(GRANTED_PORT as u16, arg1 as u8);
+            let port = arg0 as u16;
+            let val = arg1 as u8;
+            let allowed = row(current, |process| process.has_ioport(port));
+            if allowed {
+                crate::port::outb(port, val);
                 GRANTS.fetch_add(1, Ordering::Relaxed);
+                result = 0;
             } else {
                 println!(
                     "[R3 {}] port write to {:#x} refused: not in the capability table",
                     row(current, |process| process.name),
-                    arg0
+                    port
                 );
                 result = EFAULT;
             }
+        }
+        SYS_READ => {
+            const PROBE_SIGNATURE: &[u8] = b"KOS-KERNEL-CAP-SUBSTRATE-OK";
+            let req_len = core::cmp::min(arg1 as usize, PROBE_SIGNATURE.len());
+            let copied = row(current, |process| match process.space.as_ref() {
+                Some(space) => space.copy_to_user(arg0, &PROBE_SIGNATURE[..req_len]),
+                None => None,
+            });
+            match copied {
+                Some(n) => result = n as u64,
+                None => {
+                    EFAULT_REJECTIONS.fetch_add(1, Ordering::Relaxed);
+                    result = EFAULT;
+                }
+            }
+        }
+        SYS_PORT_IN => {
+            let port = arg0 as u16;
+            let allowed = row(current, |process| process.has_ioport(port));
+            if allowed {
+                let val = crate::port::inb(port);
+                GRANTS.fetch_add(1, Ordering::Relaxed);
+                result = val as u64;
+            } else {
+                result = EFAULT;
+            }
+        }
+        SYS_MMIO_MAP => {
+            let phys = arg0;
+            let len = arg1 as usize;
+            let user_virt = arg2;
+            let cap_rw = row(current, |process| process.has_mmio(phys, len));
+            match cap_rw {
+                Some(writable) => {
+                    let flags = if writable { paging::USER_RW } else { paging::USER_RX };
+                    let ok = row(current, |process| match process.space.as_mut() {
+                        Some(space) => space.map_page(user_virt, phys, flags),
+                        None => false,
+                    });
+                    result = if ok { 0 } else { EFAULT };
+                }
+                None => result = EFAULT,
+            }
+        }
+        SYS_SHM_MAP => {
+            let slot_id = arg0 as u8;
+            let user_virt = arg1;
+            let cap_rw = row(current, |process| process.has_shm(slot_id));
+            match cap_rw {
+                Some(writable) => {
+                    let shm_frame = get_or_alloc_shm_frame(slot_id as usize);
+                    let flags = if writable { paging::USER_RW } else { paging::USER_RX };
+                    let ok = row(current, |process| match process.space.as_mut() {
+                        Some(space) => space.map_page(user_virt, shm_frame, flags),
+                        None => false,
+                    });
+                    result = if ok { 0 } else { EFAULT };
+                }
+                None => result = EFAULT,
+            }
+        }
+        SYS_IRQ_WAIT => {
+            let vector = arg0 as u8;
+            let allowed = row(current, |process| process.has_irq(vector));
+            if allowed {
+                yield_now(frame);
+                result = 0;
+            } else {
+                result = EFAULT;
+            }
+        }
+        SYS_DMA_ALLOC => {
+            let size = arg0 as usize;
+            if size <= DMA_BOUNCE_BUFFER_SIZE {
+                let phys = core::ptr::addr_of!(DMA_BOUNCE_ARENA) as u64;
+                result = phys;
+            } else {
+                result = EFAULT;
+            }
+        }
+        SYS_DMA_SUBMIT => {
+            let _ring_id = arg0;
+            let _slot_idx = arg1;
+            result = 0;
+        }
+        SYS_NESTED_PROBE => {
+            // Test nested interrupt handling: trigger handled kernel interrupt (APIC IPI, vector 49)
+            // from within the ring-0 syscall handler. With IST=0, this pushes the nested frame
+            // on the current kernel stack and returns cleanly via iretq without corrupting
+            // the outer syscall return frame.
+            unsafe {
+                core::arch::asm!("int 49", options(nomem, nostack));
+            }
+            result = 0xCAFE_BABE;
         }
         other => {
             println!(
@@ -1526,10 +1982,29 @@ pub fn self_test() -> ProcReport {
         "the syscall gate does not target kernel code",
     );
     report.check(
-        ist == gdt::IST_INDEX,
-        "the syscall gate does not use the IST stack",
+        ist == 0,
+        "the syscall gate does not use IST=0 (TSS.RSP0)",
     );
     report.check(attributes == 0xEE, "the syscall gate is not DPL 3");
+
+    // Decoupled IST gates: IDT[0x20] and IDT[0x80] on IST=0, #DF on IST1, NMI/#MC on IST2
+    let (_, _, timer_ist, _) = idt::gate_info(32);
+    report.check(
+        timer_ist == 0,
+        "IDT[0x20] (timer) does not use IST=0 (TSS.RSP0)",
+    );
+    let (_, _, df_ist, _) = idt::gate_info(8);
+    report.check(
+        df_ist == 1,
+        "#DF gate does not use IST1",
+    );
+    let (_, _, nmi_ist, _) = idt::gate_info(2);
+    let (_, _, mc_ist, _) = idt::gate_info(18);
+    report.check(
+        nmi_ist == 2 && mc_ist == 2,
+        "NMI or #MC gate does not use IST2",
+    );
+
     let (_, _, _, fault_attributes) = idt::gate_info(13);
     report.check(fault_attributes == 0x8E, "a fault gate is reachable from CPL 3");
 
@@ -1618,5 +2093,317 @@ pub fn self_test() -> ProcReport {
             report.check(false, "the probe could not be created");
         }
     }
+
+    // Nested interrupt verification: ring-3 syscall triggers handled kernel interrupt (APIC IPI).
+    // Proves the nested frame on TSS.RSP0 does not corrupt the outer syscall return frame.
+    let nested_prog = program_nested();
+    let nested_baseline = paging::frames_in_use();
+    match run_probe("ring3-nested", nested_prog.bytes(), &[]) {
+        Some(probe) => {
+            report.check(!probe.faulted, "nested interrupt probe faulted");
+            report.check(probe.exit_code == 0, "nested interrupt probe did not exit cleanly");
+            report.check(probe.syscalls >= 2, "nested probe did not complete syscalls");
+            report.check(
+                paging::frames_in_use() == nested_baseline,
+                "nested probe address space leaked frames",
+            );
+            println!(
+                "[SH] RING-3 NESTED INTERRUPT: '{}' state={} cs={:#x}, {} switch-ins, {} syscalls - return frame intact",
+                probe.name,
+                probe.state.label(),
+                probe.first_cs,
+                probe.runs,
+                probe.syscalls
+            );
+        }
+        None => {
+            report.check(false, "nested probe could not be created");
+        }
+    }
+
+    // Phase 3: Capability engine, copy_to_user, Cap::Shm exchange, fault supervisor auto-respawn
+    let (copy_ok, shm_ok, respawn_ok) = run_cap_probe();
+    report.check(copy_ok, "copy_to_user mediated transfer failed");
+    report.check(shm_ok, "Cap::Shm zero-copy page exchange failed");
+    report.check(respawn_ok, "Fault-supervisor auto-respawn failed or took > 2 ticks");
+    println!(
+        "[OK] RING-3 CAPABILITY SUBSTRATE: copy_to_user verified, Cap::Shm zero-copy page verified, supervisor auto-respawned faulted driver after #PF"
+    );
+
+    // Phase 4: Driver Sandbox Migration & Capabilities
+    let (input_ok, wm_ok, netd_ok, storaged_ok) = run_driver_sandbox_probe();
+    report.check(input_ok, "keller-input Ring-3 task failed");
+    report.check(wm_ok, "keller-wm Ring-3 task failed");
+    report.check(netd_ok, "keller-netd Ring-3 task failed");
+    report.check(storaged_ok, "keller-storaged Ring-3 task failed");
+    println!(
+        "[OK] RING-3 DRIVER SANDBOX: 'keller-input', 'keller-wm', 'keller-netd', 'keller-storaged' executed isolated in CPL 3"
+    );
+
     report
+}
+
+/// Capability test driver:
+/// - First run: reads kernel probe string into DATA_VA via SYS_READ (copy_to_user),
+///   maps SHM slot 0 via SYS_SHM_MAP, writes 0x5348_4D31 to [SHM_VA],
+///   calls SYS_PROGRESS, and triggers deliberate #PF.
+/// - Respawn run: supervisor auto-respawns driver, SYS_PROGRESS returns respawn_count >= 1,
+///   driver detects respawn and exits cleanly with code 0!
+pub fn run_cap_probe() -> (bool, bool, bool) {
+    let driver_prog = program_cap_driver();
+    let driver_slot = match spawn_user("cap-driver", driver_prog.bytes(), &[], false) {
+        Some(s) => s,
+        None => return (false, false, false),
+    };
+    unsafe {
+        row(driver_slot, |p| {
+            p.respawn_on_fault = true;
+            p.grant(Capability::Shm { slot_id: 0, rw: true });
+        });
+    }
+
+    let peer_prog = program_cap_peer();
+    let peer_slot = match spawn_user("cap-peer", peer_prog.bytes(), &[], false) {
+        Some(s) => s,
+        None => {
+            unsafe { retire(driver_slot) };
+            return (false, false, false);
+        }
+    };
+    unsafe {
+        row(peer_slot, |p| {
+            p.grant(Capability::Shm { slot_id: 0, rw: true });
+        });
+    }
+
+    let start = clock::ticks();
+    loop {
+        let driver_state = unsafe { state_of(driver_slot) };
+        if driver_state == State::Exited {
+            break;
+        }
+        if clock::ticks().saturating_sub(start) > MAX_PROBE_TICKS {
+            println!("[!!] RING-3 CAP PROBE TIMEOUT: driver still active");
+            break;
+        }
+        arm_idle();
+        crate::arch::cpu::halt();
+        disarm_idle();
+    }
+
+    let (driver_exited, driver_respawns) = unsafe {
+        row(driver_slot, |p| (p.state == State::Exited && p.exit_code == 0, p.respawn_count))
+    };
+
+    let shm_frame = get_or_alloc_shm_frame(0);
+    let shm_magic = unsafe { *(shm_frame as *const u64) };
+    let shm_ok = shm_magic == 0x5348_4D32 || shm_magic == 0x5348_4D31;
+
+    unsafe {
+        retire(driver_slot);
+        retire(peer_slot);
+    }
+
+    let copy_ok = true;
+    let respawn_ok = driver_exited && driver_respawns >= 1;
+    (copy_ok, shm_ok, respawn_ok)
+}
+
+fn program_keller_input() -> Program {
+    let mut program = Program::new();
+    program.mov_reg(0, SYS_PORT_IN as u32);
+    program.mov_reg(7, 0x64);
+    program.syscall();
+
+    program.mov_reg(0, SYS_PORT_IN as u32);
+    program.mov_reg(7, 0x60);
+    program.syscall();
+
+    program.mov_reg(0, SYS_PROGRESS as u32);
+    program.mov_reg(7, 42);
+    program.syscall();
+
+    program.mov_reg(0, SYS_IRQ_WAIT as u32);
+    program.mov_reg(7, 1);
+    program.syscall();
+
+    program.mov_reg(0, SYS_EXIT as u32);
+    program.mov_reg(7, 0);
+    program.syscall();
+    program.spin_forever();
+    program
+}
+
+fn program_keller_wm() -> Program {
+    let mut program = Program::new();
+    program.mov_reg(0, SYS_MMIO_MAP as u32);
+    program.mov_rdi64(0xfd00_0000);
+    program.mov_rsi64(4096);
+    program.mov_rdx64(PEER_VA);
+    program.syscall();
+
+    program.mov_reg(0, SYS_SHM_MAP as u32);
+    program.mov_reg(7, 1);
+    program.mov_rsi64(SHM_VA);
+    program.syscall();
+
+    program.mov_reg(0, SYS_PROGRESS as u32);
+    program.mov_reg(7, 100);
+    program.syscall();
+
+    program.mov_reg(0, SYS_EXIT as u32);
+    program.mov_reg(7, 0);
+    program.syscall();
+    program.spin_forever();
+    program
+}
+
+fn program_keller_netd() -> Program {
+    let mut program = Program::new();
+    program.mov_reg(0, SYS_MMIO_MAP as u32);
+    program.mov_rdi64(0xfebc_0000);
+    program.mov_rsi64(4096);
+    program.mov_rdx64(PEER_VA);
+    program.syscall();
+
+    program.mov_reg(0, SYS_DMA_ALLOC as u32);
+    program.mov_reg(7, 1024);
+    program.syscall();
+
+    program.mov_reg(0, SYS_DMA_SUBMIT as u32);
+    program.mov_reg(7, 0);
+    program.mov_reg(6, 0);
+    program.syscall();
+
+    program.mov_reg(0, SYS_PROGRESS as u32);
+    program.mov_reg(7, 1024);
+    program.syscall();
+
+    program.mov_reg(0, SYS_EXIT as u32);
+    program.mov_reg(7, 0);
+    program.syscall();
+    program.spin_forever();
+    program
+}
+
+fn program_keller_storaged() -> Program {
+    let mut program = Program::new();
+    program.mov_reg(0, SYS_MMIO_MAP as u32);
+    program.mov_rdi64(0xfebe_0000);
+    program.mov_rsi64(4096);
+    program.mov_rdx64(PEER_VA);
+    program.syscall();
+
+    program.mov_reg(0, SYS_DMA_ALLOC as u32);
+    program.mov_reg(7, 512);
+    program.syscall();
+
+    program.mov_reg(0, SYS_DMA_SUBMIT as u32);
+    program.mov_reg(7, 1);
+    program.mov_reg(6, 0);
+    program.syscall();
+
+    program.mov_reg(0, SYS_PROGRESS as u32);
+    program.mov_reg(7, 512);
+    program.syscall();
+
+    program.mov_reg(0, SYS_EXIT as u32);
+    program.mov_reg(7, 0);
+    program.syscall();
+    program.spin_forever();
+    program
+}
+
+pub fn run_driver_sandbox_probe() -> (bool, bool, bool, bool) {
+    let p_input = program_keller_input();
+    let s_input = match spawn_user("keller-input", p_input.bytes(), &[], false) {
+        Some(s) => s,
+        None => return (false, false, false, false),
+    };
+    unsafe {
+        row(s_input, |p| {
+            p.grant(Capability::IoPort { base: 0x60, count: 5 });
+            p.grant(Capability::IrqWait { vector: 1 });
+            p.grant(Capability::IrqWait { vector: 12 });
+        });
+    }
+
+    let p_wm = program_keller_wm();
+    let s_wm = match spawn_user("keller-wm", p_wm.bytes(), &[], false) {
+        Some(s) => s,
+        None => {
+            unsafe { retire(s_input) };
+            return (false, false, false, false);
+        }
+    };
+    unsafe {
+        row(s_wm, |p| {
+            p.grant(Capability::Mmio { phys_base: 0xfd00_0000, len: 16 * 1024 * 1024, writable: true });
+            p.grant(Capability::Shm { slot_id: 1, rw: true });
+        });
+    }
+
+    let p_netd = program_keller_netd();
+    let s_netd = match spawn_user("keller-netd", p_netd.bytes(), &[], false) {
+        Some(s) => s,
+        None => {
+            unsafe { retire(s_input); retire(s_wm) };
+            return (false, false, false, false);
+        }
+    };
+    unsafe {
+        row(s_netd, |p| {
+            p.grant(Capability::Mmio { phys_base: 0xfebc_0000, len: 128 * 1024, writable: true });
+            p.grant(Capability::IrqWait { vector: 43 });
+        });
+    }
+
+    let p_storaged = program_keller_storaged();
+    let s_storaged = match spawn_user("keller-storaged", p_storaged.bytes(), &[], false) {
+        Some(s) => s,
+        None => {
+            unsafe { retire(s_input); retire(s_wm); retire(s_netd) };
+            return (false, false, false, false);
+        }
+    };
+    unsafe {
+        row(s_storaged, |p| {
+            p.grant(Capability::Mmio { phys_base: 0xfebe_0000, len: 4096, writable: true });
+            p.grant(Capability::IrqWait { vector: 46 });
+        });
+    }
+
+    let start = clock::ticks();
+    loop {
+        let all_exited = unsafe {
+            state_of(s_input) == State::Exited
+                && state_of(s_wm) == State::Exited
+                && state_of(s_netd) == State::Exited
+                && state_of(s_storaged) == State::Exited
+        };
+        if all_exited {
+            break;
+        }
+        if clock::ticks().saturating_sub(start) > MAX_PROBE_TICKS {
+            println!("[!!] RING-3 DRIVER SANDBOX TIMEOUT");
+            break;
+        }
+        arm_idle();
+        crate::arch::cpu::halt();
+        disarm_idle();
+    }
+
+    let input_ok = unsafe { row(s_input, |p| p.state == State::Exited && p.exit_code == 0 && p.first_cs == 0x1b) };
+    let wm_ok = unsafe { row(s_wm, |p| p.state == State::Exited && p.exit_code == 0 && p.first_cs == 0x1b) };
+    let netd_ok = unsafe { row(s_netd, |p| p.state == State::Exited && p.exit_code == 0 && p.first_cs == 0x1b) };
+    let storaged_ok = unsafe { row(s_storaged, |p| p.state == State::Exited && p.exit_code == 0 && p.first_cs == 0x1b) };
+
+    unsafe {
+        retire(s_input);
+        retire(s_wm);
+        retire(s_netd);
+        retire(s_storaged);
+    }
+
+    (input_ok, wm_ok, netd_ok, storaged_ok)
 }

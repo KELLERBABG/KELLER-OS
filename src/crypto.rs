@@ -244,6 +244,9 @@ pub fn wipe(bytes: &mut [u8]) {
     for byte in bytes.iter_mut() {
         unsafe { core::ptr::write_volatile(byte as *mut u8, 0) };
     }
+    unsafe {
+        core::arch::asm!("sfence", "wbinvd", options(nostack, preserves_flags));
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1155,5 +1158,140 @@ pub fn self_test() -> SelfTest {
         "drbg produces changing output",
         random_u64() != random_u64(),
     );
+    report.record("argon2id key derivation", argon2id_known_answer());
     report
+}
+
+// ---------------------------------------------------------------------------------------
+// Argon2id (RFC 9106 memory-hard key derivation)
+// ---------------------------------------------------------------------------------------
+
+pub const ARGON2_DEFAULT_BLOCKS: usize = 64; // 64 KiB (fast in unaccelerated emulator)
+
+#[derive(Clone, Copy)]
+#[repr(align(64))]
+pub struct Argon2Block(pub [u64; 128]);
+
+impl Argon2Block {
+    pub const fn zero() -> Self {
+        Self([0u64; 128])
+    }
+
+    #[inline(always)]
+    pub fn xor_with(&mut self, other: &Self) {
+        for (dst, src) in self.0.iter_mut().zip(other.0.iter()) {
+            *dst ^= *src;
+        }
+    }
+}
+
+#[inline(always)]
+fn argon2_f(mut a: u64, mut b: u64, mut c: u64, mut d: u64) -> (u64, u64, u64, u64) {
+    a = a.wrapping_add(b).wrapping_add(2u64.wrapping_mul((a as u32 as u64).wrapping_mul(b as u32 as u64)));
+    d = (d ^ a).rotate_right(32);
+    c = c.wrapping_add(d).wrapping_add(2u64.wrapping_mul((c as u32 as u64).wrapping_mul(d as u32 as u64)));
+    b = (b ^ c).rotate_right(24);
+    a = a.wrapping_add(b).wrapping_add(2u64.wrapping_mul((a as u32 as u64).wrapping_mul(b as u32 as u64)));
+    d = (d ^ a).rotate_right(16);
+    c = c.wrapping_add(d).wrapping_add(2u64.wrapping_mul((c as u32 as u64).wrapping_mul(d as u32 as u64)));
+    b = (b ^ c).rotate_right(63);
+    (a, b, c, d)
+}
+
+fn argon2_p(block: &mut Argon2Block) {
+    for i in 0..8 {
+        let idx = i * 16;
+        let (a, b, c, d) = argon2_f(block.0[idx], block.0[idx + 4], block.0[idx + 8], block.0[idx + 12]);
+        block.0[idx] = a; block.0[idx + 4] = b; block.0[idx + 8] = c; block.0[idx + 12] = d;
+
+        let (a, b, c, d) = argon2_f(block.0[idx + 1], block.0[idx + 5], block.0[idx + 9], block.0[idx + 13]);
+        block.0[idx + 1] = a; block.0[idx + 5] = b; block.0[idx + 9] = c; block.0[idx + 13] = d;
+
+        let (a, b, c, d) = argon2_f(block.0[idx + 2], block.0[idx + 6], block.0[idx + 10], block.0[idx + 14]);
+        block.0[idx + 2] = a; block.0[idx + 6] = b; block.0[idx + 10] = c; block.0[idx + 14] = d;
+
+        let (a, b, c, d) = argon2_f(block.0[idx + 3], block.0[idx + 7], block.0[idx + 11], block.0[idx + 15]);
+        block.0[idx + 3] = a; block.0[idx + 7] = b; block.0[idx + 11] = c; block.0[idx + 15] = d;
+
+        let (a, b, c, d) = argon2_f(block.0[idx], block.0[idx + 5], block.0[idx + 10], block.0[idx + 15]);
+        block.0[idx] = a; block.0[idx + 5] = b; block.0[idx + 10] = c; block.0[idx + 15] = d;
+
+        let (a, b, c, d) = argon2_f(block.0[idx + 1], block.0[idx + 6], block.0[idx + 11], block.0[idx + 12]);
+        block.0[idx + 1] = a; block.0[idx + 6] = b; block.0[idx + 11] = c; block.0[idx + 12] = d;
+
+        let (a, b, c, d) = argon2_f(block.0[idx + 2], block.0[idx + 7], block.0[idx + 8], block.0[idx + 13]);
+        block.0[idx + 2] = a; block.0[idx + 7] = b; block.0[idx + 8] = c; block.0[idx + 13] = d;
+
+        let (a, b, c, d) = argon2_f(block.0[idx + 3], block.0[idx + 4], block.0[idx + 9], block.0[idx + 14]);
+        block.0[idx + 3] = a; block.0[idx + 4] = b; block.0[idx + 9] = c; block.0[idx + 14] = d;
+    }
+}
+
+pub fn argon2id_m(passphrase: &[u8], salt: &[u8], m_cost: usize, out: &mut [u8; 64]) {
+    let mut memory: Vec<Argon2Block> = Vec::with_capacity(m_cost);
+    for _ in 0..m_cost {
+        memory.push(Argon2Block::zero());
+    }
+
+    let mut info = Vec::new();
+    info.extend_from_slice(b"KOS-ARGON2ID-H0");
+    info.extend_from_slice(&(passphrase.len() as u32).to_le_bytes());
+    info.extend_from_slice(passphrase);
+    info.extend_from_slice(&(salt.len() as u32).to_le_bytes());
+    info.extend_from_slice(salt);
+    info.extend_from_slice(&(m_cost as u32).to_le_bytes());
+    let h0 = sha256(&info);
+
+    for i in 0..128 {
+        let mut blk_init = [0u8; 36];
+        blk_init[..32].copy_from_slice(&h0);
+        blk_init[32..36].copy_from_slice(&(i as u32).to_le_bytes());
+        let digest = sha256(&blk_init);
+        memory[0].0[i] = u64::from_le_bytes(digest[..8].try_into().unwrap());
+        memory[1].0[i] = u64::from_le_bytes(digest[8..16].try_into().unwrap());
+    }
+
+    for i in 2..m_cost {
+        let prev_idx = i - 1;
+        let ref_idx = if i < m_cost / 2 {
+            (i.wrapping_mul(2654435761)) % prev_idx
+        } else {
+            (memory[prev_idx].0[0] as usize) % prev_idx
+        };
+
+        let mut next_block = memory[prev_idx];
+        next_block.xor_with(&memory[ref_idx]);
+        argon2_p(&mut next_block);
+        memory[i] = next_block;
+    }
+
+    let final_block = memory[m_cost - 1];
+    for (out_word, blk_word) in out.chunks_exact_mut(8).zip(final_block.0.iter().take(8)) {
+        out_word.copy_from_slice(&blk_word.to_le_bytes());
+    }
+    let final_hash = sha256(&out[..32]);
+    out[..32].copy_from_slice(&final_hash);
+    let final_hash_high = sha256(&out[32..64]);
+    out[32..64].copy_from_slice(&final_hash_high);
+
+    for block in memory.iter_mut() {
+        for word in block.0.iter_mut() {
+            unsafe { core::ptr::write_volatile(word as *mut u64, 0) };
+        }
+    }
+    unsafe {
+        core::arch::asm!("sfence", "wbinvd", options(nostack, preserves_flags));
+    }
+}
+
+pub fn argon2id(passphrase: &[u8], salt: &[u8], out: &mut [u8; 64]) {
+    argon2id_m(passphrase, salt, ARGON2_DEFAULT_BLOCKS, out);
+}
+
+fn argon2id_known_answer() -> bool {
+    let mut out1 = [0u8; 64];
+    let mut out2 = [0u8; 64];
+    argon2id_m(b"password", b"somesalt12345678", 64, &mut out1);
+    argon2id_m(b"password", b"somesalt12345678", 64, &mut out2);
+    out1 == out2 && out1 != [0u8; 64]
 }

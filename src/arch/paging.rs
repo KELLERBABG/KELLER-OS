@@ -139,6 +139,8 @@ pub struct Walk {
     pub leaf: u64,
     /// True when U/S is set on *every* level, i.e. CPL 3 may touch this page.
     pub user_reachable: bool,
+    /// True when R/W is set on *every* level, i.e. page is writable.
+    pub writable: bool,
 }
 
 impl Walk {
@@ -157,6 +159,7 @@ pub fn walk(pml4: u64, virt: u64) -> Option<Walk> {
         return None;
     }
     let mut user_reachable = true;
+    let mut writable = true;
     let mut table = pml4;
     // PML4, PDPT, PD and PT. A level with PS set terminates the walk early: the kernel's
     // identity map uses 2 MiB pages, so a walk that insisted on four levels would report the
@@ -167,12 +170,14 @@ pub fn walk(pml4: u64, virt: u64) -> Option<Walk> {
             return None;
         }
         user_reachable &= entry & USER != 0;
+        writable &= entry & WRITABLE != 0;
         if entry & HUGE != 0 {
             let page_size = 1u64 << shift;
             return Some(Walk {
                 phys: (entry & ADDRESS_MASK & !(page_size - 1)) | (virt & (page_size - 1)),
                 leaf: entry & !ADDRESS_MASK,
                 user_reachable,
+                writable,
             });
         }
         if level == 3 {
@@ -180,6 +185,7 @@ pub fn walk(pml4: u64, virt: u64) -> Option<Walk> {
                 phys: (entry & ADDRESS_MASK) | (virt & (PAGE_SIZE - 1)),
                 leaf: entry & !ADDRESS_MASK,
                 user_reachable,
+                writable,
             });
         }
         table = entry & ADDRESS_MASK;
@@ -305,10 +311,18 @@ impl AddressSpace {
         let pt = self.table_or_alloc(pd, index_of(virt, 21));
         set_entry(pt, index_of(virt, 12), phys | flags);
         // Remember the leaf frame so teardown can hand it back to the heap.
-        let already = (0..self.leaf_count).any(|index| self.leaves[index] == phys);
-        if !already {
-            self.leaves[self.leaf_count] = phys;
-            self.leaf_count += 1;
+        // Non-heap addresses (MMIO aperture, device BARs, shared arenas) must not be freed on teardown!
+        let is_heap = if let Some((start, size)) = crate::mm::heap_span() {
+            phys >= start && phys < start + size
+        } else {
+            false
+        };
+        if is_heap {
+            let already = (0..self.leaf_count).any(|index| self.leaves[index] == phys);
+            if !already {
+                self.leaves[self.leaf_count] = phys;
+                self.leaf_count += 1;
+            }
         }
         true
     }
@@ -372,6 +386,45 @@ impl AddressSpace {
                 ptr::copy_nonoverlapping(
                     translation.phys as *const u8,
                     destination.as_mut_ptr().add(copied),
+                    chunk,
+                );
+            }
+            copied += chunk;
+        }
+        Some(copied)
+    }
+
+    /// Copies `source` bytes from kernel memory into user virtual address `virt`.
+    ///
+    /// Validates on *this* space that all affected pages are user-accessible (U/S = 1)
+    /// and writable (R/W = 1) across all four paging levels before copying anything.
+    pub fn copy_to_user(&self, virt: u64, source: &[u8]) -> Option<usize> {
+        let length = source.len();
+        // Pre-flight check: verify Present, User, and Writable on all target pages
+        let mut checked = 0usize;
+        while checked < length {
+            let address = virt.checked_add(checked as u64)?;
+            let translation = self.translate(address)?;
+            if !translation.user_reachable || !translation.writable {
+                return None;
+            }
+            let frame_offset = (translation.phys & (PAGE_SIZE - 1)) as usize;
+            let page_room = (PAGE_SIZE as usize) - frame_offset;
+            checked += core::cmp::min(page_room, length - checked);
+        }
+
+        // Perform copying
+        let mut copied = 0usize;
+        while copied < length {
+            let address = virt + copied as u64;
+            let translation = self.translate(address)?;
+            let frame_offset = (translation.phys & (PAGE_SIZE - 1)) as usize;
+            let page_room = (PAGE_SIZE as usize) - frame_offset;
+            let chunk = core::cmp::min(page_room, length - copied);
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    source.as_ptr().add(copied),
+                    translation.phys as *mut u8,
                     chunk,
                 );
             }
@@ -557,6 +610,22 @@ pub fn self_test() -> PagingReport {
             .map(|read| read == 8)
             .unwrap_or(false),
         "copy_from_user rejected a user page it had just mapped",
+    );
+
+    // copy_to_user verification
+    let test_bytes = [0x55u8, 0xAA, 0x12, 0x34, 0x78, 0x9A, 0xBC, 0xDE];
+    report.check(
+        alpha.copy_to_user(same_virtual, &test_bytes) == Some(8),
+        "copy_to_user failed to write to a valid USER_RW page",
+    );
+    let mut readback = [0u8; 8];
+    report.check(
+        alpha.copy_from_user(same_virtual, &mut readback) == Some(8) && readback == test_bytes,
+        "copy_to_user write did not match copy_from_user readback",
+    );
+    report.check(
+        alpha.copy_to_user(kernel_probe, &test_bytes).is_none(),
+        "copy_to_user accepted a supervisor address",
     );
 
     // Remapping: a removed page has to disappear from the walk, not just from the TLB.
