@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Keller Systems">
-  <rect width="128" height="128" rx="28" fill="#0b0d10" stroke="rgba(52,211,153,0.2)" stroke-width="2"/>
-  <rect x="28" y="24" width="20" height="80" rx="4" fill="#ffffff"/>
-  <path d="M58 62 L88 24 H104 L70 66 Z" fill="#34d399"/>
-  <path d="M70 62 L104 104 H88 L58 66 Z" fill="#059669"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="KELLER-OS - Keller Systems">
+  <rect width="128" height="128" rx="28" fill="#0b0d10" stroke="#2a3138" stroke-width="2"/>
+  <rect x="28" y="24" width="20" height="80" rx="4" fill="#e6edf3"/>
+  <path d="M58 62 L88 24 H104 L70 66 Z" fill="#c9834f"/>
+  <path d="M70 62 L104 104 H88 L58 66 Z" fill="#8b98a6"/>
 </svg>

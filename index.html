@@ -50,104 +50,96 @@ html{scrollbar-color:#2a3138 #0b0d10;scrollbar-width:thin}
 ::-webkit-scrollbar{width:12px}::-webkit-scrollbar-track{background:#0b0d10}
 ::-webkit-scrollbar-thumb{background:#2a3138;border:3px solid #0b0d10}::-webkit-scrollbar-thumb:hover{background:#c9834f}
 /* mobile-figure */@media (max-width:900px){.panel,.chart,.die,.pfd,.cfg,.console,.figs,.seqblock,.map{overflow-x:auto;-webkit-overflow-scrolling:touch}.panel svg,.chart svg,.die svg,.pfd svg,.cfg svg,.figs svg,.map svg{min-width:660px;max-width:none}}
-
-/* --- Slim Technical Top Navigation --- */
-.top-nav {
-  background: #0b0d10;
-  border-bottom: 1px solid rgba(52,211,153,0.2);
-  width: 100%;
-  position: relative;
-  z-index: 999;
-}
-.nav-inner {
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 0 clamp(16px, 4vw, 40px);
+/* --- Keller Systems Subtle Masthead Lockup --- */
+header { padding-top: clamp(18px, 3.2vw, 30px) !important; }
+.ks-masthead {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 38px;
+  gap: 16px;
+  padding-bottom: 12px;
+  margin-bottom: clamp(18px, 3vw, 28px);
+  border-bottom: 1px solid #2a3138;
 }
-.brand-link {
+.ks-brand {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   text-decoration: none !important;
   border-bottom: none !important;
 }
-.brand-mark-svg {
-  width: 18px !important;
-  min-width: 18px !important;
-  max-width: 18px !important;
-  height: 18px !important;
-  min-height: 18px !important;
-  max-height: 18px !important;
+.ks-mark {
+  width: 22px !important;
+  min-width: 22px !important;
+  max-width: 22px !important;
+  height: 22px !important;
+  min-height: 22px !important;
+  max-height: 22px !important;
   padding: 0 !important;
   margin: 0 !important;
   display: block !important;
   flex-shrink: 0 !important;
 }
-.brand-titles {
+.ks-titles {
   display: inline-flex;
   flex-direction: column;
-  line-height: 1.1;
+  line-height: 1.12;
 }
-.brand-product-title {
-  font-family: var(--sans, 'Space Grotesk', -apple-system, sans-serif);
-  font-size: 13px;
-  font-weight: 700;
-  color: #ffffff;
+.ks-name {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #e6edf3;
   letter-spacing: -0.01em;
 }
-.brand-company-sub {
-  font-family: var(--mono, 'IBM Plex Mono', 'JetBrains Mono', monospace);
-  font-size: 8px;
-  font-weight: 600;
-  color: #8e95ac;
+.ks-sub {
+  font-family: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 8.5px;
+  font-weight: 500;
+  color: #8b98a6;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+  margin-top: 2px;
 }
-.nav-links-group {
+.ks-brand:hover .ks-name {
+  color: #c9834f;
+}
+.ks-links {
   display: inline-flex;
   align-items: center;
   gap: 14px;
 }
-.nav-portal-link {
-  font-family: var(--mono, 'IBM Plex Mono', 'JetBrains Mono', monospace);
-  font-size: 11px;
-  color: #8e95ac;
+.ks-link {
+  font-family: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  color: #8b98a6;
   text-decoration: none !important;
   border-bottom: none !important;
+  letter-spacing: 0.03em;
   transition: color 0.15s;
 }
-.nav-portal-link:hover {
-  color: #ffffff;
+.ks-link:hover {
+  color: #e6edf3;
 }
-
-</style></head><body>
-<header class="top-nav">
-  <div class="nav-inner">
-    <a href="https://kellersystems.dev" class="brand-link">
-      <svg class="brand-mark-svg" viewBox="0 0 100 100" aria-hidden="true">
-        <rect x="18" y="14" width="18" height="72" rx="3" fill="#ffffff"/>
-        <path d="M46 50 L72 16 H90 L60 54 Z" fill="#34d399"/>
-        <path d="M60 46 L90 84 H72 L46 50 Z" fill="#059669"/>
-      </svg>
-      <div class="brand-titles">
-        <div class="brand-product-title">KELLER-OS</div>
-        <div class="brand-company-sub">KELLER SYSTEMS</div>
-      </div>
-    </a>
-    <div class="nav-links-group">
-      <a href="https://kellersystems.dev" class="nav-portal-link">kellersystems.dev &rarr;</a>
-      <a href="https://github.com/KELLERBABG/KELLER-OS" target="_blank" rel="noopener noreferrer" class="nav-portal-link">Source &#8599;</a>
-    </div>
-  </div>
-</header>
-<!-- noscript-fallback --><noscript><style>html *{opacity:1!important;transform:none!important;filter:none!important;animation:none!important}[data-a],[data-b],.d,.o,.fade,.draw,.chapter,.step,.panel,.hlab{opacity:1!important}</style></noscript>
-
-
+</style></head><body><!-- noscript-fallback --><noscript><style>html *{opacity:1!important;transform:none!important;filter:none!important;animation:none!important}[data-a],[data-b],.d,.o,.fade,.draw,.chapter,.step,.panel,.hlab{opacity:1!important}</style></noscript>
 <div class="wrap"><header>
+      <div class="ks-masthead">
+        <a href="https://kellersystems.dev" class="ks-brand" title="Keller Systems">
+          <svg class="ks-mark" viewBox="0 0 100 100" width="22" height="22" aria-hidden="true">
+            <rect x="18" y="14" width="18" height="72" rx="3" fill="#e6edf3"/>
+            <path d="M46 50 L72 16 H90 L60 54 Z" fill="#c9834f"/>
+            <path d="M60 46 L90 84 H72 L46 50 Z" fill="#8b98a6"/>
+          </svg>
+          <span class="ks-titles">
+            <span class="ks-name">KELLER-OS</span>
+            <span class="ks-sub">KELLER SYSTEMS</span>
+          </span>
+        </a>
+        <div class="ks-links">
+          <a href="https://kellersystems.dev" class="ks-link">kellersystems.dev &rarr;</a>
+        <a href="https://github.com/KELLERBABG/KELLER-OS" target="_blank" rel="noopener noreferrer" class="ks-link">Source &#8599;</a>
+        </div>
+      </div>
   <span class="kick">Bare-metal x86_64 &middot; Rust &middot; no_std</span>
   <h1>KELLER-OS</h1>
   <p class="sub">A microkernel that boots to ring 3 and proves it. It replaces the 8259 with a Local APIC and an IO-APIC, starts its application processors with INIT-SIPI-SIPI, and drops into an unprivileged task whose own CPU frame testifies that it runs at CPL 3.</p>
